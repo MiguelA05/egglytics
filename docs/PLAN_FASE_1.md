@@ -53,12 +53,12 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 
 ### Tarea 4 — Medición de accesos a documentos en reglas con lotes grandes
 - **Objetivo:**
-  1. Consultar la documentación oficial vigente de Firestore sobre límites de accesos a documentos (`get`/`exists`/`existsAfter`) por operación y por lote (`WriteBatch`) y si el emulador aplica los mismos límites que producción.
+  1. Consultar la documentación oficial vigente de Firestore sobre límites de accesos a documentos (`get`/`exists`/`existsAfter`) por operación y por lote (`WriteBatch`) con su fuente, y verificar si el emulador aplica los mismos límites que producción (si algo no se puede confirmar, indicarlo sin suponerlo).
   2. Medir en el emulador el número de accesos en:
      - Abono repartido en 10 ventas pendientes (`WriteBatch` de 10 `payments`).
      - Cierre con conteos (`WriteBatch` de 3 `counts` + 1 `closings`).
      - Devolución con `refund` (`WriteBatch` de `saleReturns` + `payments` con `existsAfter`).
-  3. Decidir si `fechaOperativa >= businessData(b).startDate` permanece en `validMovement` o pasa solo a la app. Si cambia el diseño de `validMovement`, actualizar primero `§11.1` de `docs/ESPECIFICACION.md` y solicitar aprobación antes de seguir.
+  3. Decidir si `fechaOperativa >= businessData(b).startDate` permanece en `validMovement` o pasa solo a la app. Si cambia el diseño de `validMovement`, actualizar primero `§11.1` de `docs/ESPECIFICACION.md` y avisar antes de seguir.
 - **Requisitos / Reglas:** `§5.1`, `§11.1`, `§14.1`.
 - **AC:** Pruebas de medición de lotes en Emulador.
 - **Verificación:** Reporte con fuente oficial, mediciones y decisión documentada en `docs/ESPECIFICACION.md`.
@@ -90,3 +90,10 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **AC:** `AC-04`, `AC-33`, `AC-39`, `AC-64`.
 - **Archivos / Módulos:** `app/src/main/kotlin/.../data/repository/`, `app/src/main/kotlin/.../ui/`.
 - **Verificación:** Pruebas de ViewModel/repositorio y prueba manual en modo avión.
+
+## 4. Protocolo de ejecución
+
+- **Una tarea por vez:** Al terminar cada tarea, detenerse y entregar: resumen, comandos ejecutados, resultado de las pruebas (incluyendo que fallaban antes de implementar) y el commit. No continuar sin aprobación explícita.
+- **Aprobación de comandos:** Pedir aprobación antes de cada comando de terminal.
+- **Sin despliegue real ni secretos:** No ejecutar `firebase deploy` contra ningún proyecto real (todo va al emulador) y no guardar claves de servicio ni `google-services.json` real en el repositorio (usar `.example` si hace falta).
+- **Contradicciones:** Si surge una contradicción con `docs/ESPECIFICACION.md`, detenerse y preguntar sin resolverla por cuenta propia.
