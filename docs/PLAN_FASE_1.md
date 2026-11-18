@@ -15,8 +15,8 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 
 1. **Tarea 1a (Hecha — `fa9e11d`):** Proyecto Gradle multimódulo (`:app` y `:domain`), Hilt, `BuildConfig` con `businessId`, `google-services.json.example`.
 2. **Tarea 1b (Hecha — `f5dff57`):** Detekt `1.23.8` y `NoFloatingPointTypesTest` (`AC-36`) en `:domain`.
-3. **Tarea 2a:** Enumeraciones (`EggClassification`, `FeedIngredient`, `MemberRole`, `PaymentType`) y `OperationalDate` en `:domain`.
-4. **Tarea 2b:** Modelos (`Member`, `Price`, `ExpenseCategory`, `PaymentMethod`), `ActivePriceResult` y `GetActivePriceUseCase` en `:domain`.
+3. **Tarea 2a (Hecha — `c23ea8f`):** Enumeraciones (`EggClassification`, `FeedIngredient`, `MemberRole`, `PaymentType`) y `OperationalDate` en `:domain`.
+4. **Tarea 2b (Hecha — `fb2b85e`):** Modelos (`Member`, `Price`, `ExpenseCategory`, `PaymentMethod`), `ActivePriceResult` y `GetActivePriceUseCase` en `:domain`.
 4. **Tarea 3a:** Reglas mínimas de Firestore (`members`, `businesses`, `payments` y `validMovement`) con sus pruebas en `@firebase/rules-unit-testing`.
 5. **Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).
 6. **Tarea 3b:** Resto de reglas de Firestore (`prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y demás colecciones) y sus AC en el emulador.
@@ -41,13 +41,13 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **Verificación:** Fallo demostrado con archivo temporal con `Double`, archivo borrado y `.\gradlew.bat clean :domain:detekt :domain:test` → `BUILD SUCCESSFUL`. Commit: `f5dff57`.
 - **Mejora menor pendiente:** Asegurar que el detalle `archivo:línea` del fallo de `NoFloatingPointTypesTest` se imprima completo en consola de Gradle (por ejemplo configurando `testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }` en `:domain`) sin necesidad de abrir el reporte HTML/XML.
 
-### Tarea 2a — Enumeraciones y `OperationalDate` en `:domain`
+### Tarea 2a — Enumeraciones y `OperationalDate` en `:domain` *(Hecha)*
 - **Objetivo:** Implementar `EggClassification` (`B`, `A`, `AA`, `AAA`, `JUMBO`), `FeedIngredient` (`concentrate`, `corn_bran`), `MemberRole` (`admin`, `operator`), `PaymentType` (`payment`, `refund`, `overpayment_refund`) y `OperationalDate` (parseo estricto `YYYY-MM-DD`, formateo, zona `America/Bogota`).
 - **Requisitos / Reglas:** `R-02`, `R-13`, `§0`, `§3`, `§8.3`.
 - **Archivos / Módulos:** `domain/src/main/kotlin/com/egglytics/domain/model/`, `domain/src/test/kotlin/com/egglytics/domain/model/`.
-- **Verificación:** Pruebas JUnit con `TODO()` fallando primero, luego implementación y `.\gradlew.bat clean :domain:detekt :domain:test` en verde.
+- **Verificación:** Pruebas JUnit con `TODO()` fallando primero, luego implementación y `.\gradlew.bat clean :domain:detekt :domain:test` en verde. Commit: `c23ea8f` (y `1e72b0a` para `docs/PLAN_FASE_1.md`).
 
-### Tarea 2b — Modelos de catálogos, `ActivePriceResult` y `GetActivePriceUseCase`
+### Tarea 2b — Modelos de catálogos, `ActivePriceResult` y `GetActivePriceUseCase` *(Hecha)*
 - **Objetivo:** Implementar en `:domain` (Kotlin puro, sin Android ni Firebase) `Member`, `Price` (`pricePerBucket: Long > 0L`, `validFrom: LocalDate`, `createdAt: Instant`), `ExpenseCategory`, `PaymentMethod`, `ActivePriceResult` (`sealed interface`: `Found(price)` / `NotFound`, para forzar el manejo explícito de `R-04` «sin precio no se permite vender») y `GetActivePriceUseCase` (función pura que recibe `fechaOperativa: LocalDate` sin usar reloj del sistema).
   - **Tipos fuera de Tarea 2 (Fases 2 y 3):** movimientos operativos (`Harvest`, `Sale`, `Payment`, `SaleReturn`, `EggOutflow`, `Feed*`, `Expense`, `Withdrawal`, `Count`, `Closing`, `Reversal`, `OpeningBalance`, `Customer`) y cálculos de saldos/alertas/CSV.
   - **Frontera con `:data`:** La conversión entre `String YYYY-MM-DD` / `Timestamp` de Firestore y `LocalDate` / `Instant` de dominio es responsabilidad de la capa `data` (Tarea 5).
@@ -55,7 +55,8 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **AC:** `AC-04` (catálogo), `AC-39`.
 - **Casos de prueba de precio vigente:** coincidencia exacta (`validFrom == fechaOperativa`), vigente anterior, frontera futura (`validFrom == fechaOperativa + 1 día` excluido), fecha fija lejana (`2030`) demostrando independencia del reloj del sistema, cambio de catálogo (`AC-04`), empate en `validFrom` desempatado por `createdAt`, empate doble (`validFrom` y `createdAt` iguales) desempatado determinísticamente por `id` mayor (nota: es determinista pero arbitrario porque los IDs de Firestore son aleatorios; se documentará en `ESPECIFICACION.md` después), lista en orden aleatorio (mismo resultado), `NotFound` (lista vacía / solo futuros / otra clasificación), aislamiento por clasificación y rechazo de `pricePerBucket <= 0L`.
 - **Archivos / Módulos:** `domain/src/main/kotlin/...`, `domain/src/test/kotlin/...`.
-- **Verificación:** Pruebas JUnit escritas primero (fallan) y luego en verde (`.\gradlew.bat :domain:detekt :domain:test`).
+- **Verificación:** `.\gradlew.bat clean :domain:detekt :domain:test` → `BUILD SUCCESSFUL` (25 pruebas en verde, `detekt` sin hallazgos). Commit: `fb2b85e`.
+- **Mejora menor pendiente:** Que la prueba de orden aleatorio en `GetActivePriceUseCaseTest` use varias permutaciones (lista invertida y varias semillas distintas), en lugar de una sola semilla (`Random(42)`).
 
 ### Tarea 3a — Reglas mínimas de Firestore y pruebas base
 - **Objetivo:** Crear `firestore.rules` con las funciones base (`memberData`, `businessData`, `isActive`, `isAdmin`, `isOperator`, `validDate`, `validDeviceTime`, `validMovement`) y las reglas de `businesses`, `members` (solo lectura para miembros activos) y `payments` (sus 3 tipos con lista cerrada de campos), más la configuración del proyecto de pruebas TypeScript/Node con `@firebase/rules-unit-testing`.
