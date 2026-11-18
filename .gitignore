@@ -13,3 +13,5 @@ app/google-services.json
 *.keystore
 service-account*.json
 .firebase/
+firestore-tests/node_modules/
+*-debug.log
