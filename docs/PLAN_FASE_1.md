@@ -9,12 +9,12 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **Regla de IDE:** No aceptar el asistente de actualización de AGP (*AGP Upgrade Assistant*) de Android Studio mientras estemos en esta línea. La migración a AGP 9 queda como una tarea futura separada.
 - **Pruebas de reglas de seguridad:** TypeScript/Node.js con `@firebase/rules-unit-testing` contra Firebase Emulator Suite.
 - **Pruebas de repositorios (Tarea 5):** Kotlin/JUnit contra Firebase Emulator Suite.
-- **Revisión estática (`AC-36`):** Detekt configurado sobre `:domain` (y `:app`) más regla/prueba automática que falle si aparece `Float` o `Double` en `:domain` o en importes.
+- **Revisión estática (`AC-36`):** La cumple la prueba JUnit `NoFloatingPointTypesTest` en `:domain` (escanea `domain/src/main/kotlin`), con `detekt 1.23.8` en `:domain` como complemento. Lo que `NoFloatingPointTypesTest` **no** cubre: inferencia de tipos sin anotación ni literal flotante, `DoubleArray`/`FloatArray`, `toDoubleOrNull`/`toFloatOrNull`, notación científica sin punto (`1e3`), literales con guion bajo (`1_000.5`) y archivos de test (`domain/src/test/kotlin`).
 
 ## 2. Orden y dependencias
 
 1. **Tarea 1a (Hecha — `fa9e11d`):** Proyecto Gradle multimódulo (`:app` y `:domain`), Hilt, `BuildConfig` con `businessId`, `google-services.json.example`.
-2. **Tarea 1b:** Detekt y verificación de `AC-36` (incluyendo demostración de fallo con un caso de prueba).
+2. **Tarea 1b (Hecha — `f5dff57`):** Detekt `1.23.8` y `NoFloatingPointTypesTest` (`AC-36`) en `:domain`.
 3. **Tarea 2:** Modelos base y lógica pura de dominio de Fase 1 en `:domain` (JUnit primero).
 4. **Tarea 3a:** Reglas mínimas de Firestore (`members`, `businesses`, `payments` y `validMovement`) con sus pruebas en `@firebase/rules-unit-testing`.
 5. **Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).
@@ -32,19 +32,28 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **Archivos / Módulos:** `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `domain/build.gradle.kts`, `app/build.gradle.kts`, `app/google-services.json.example`, `app/src/main/...`.
 - **Verificación:** Compilación de `:domain` y `:app` (`.\gradlew.bat clean :domain:test :app:compileDebugKotlin` → `BUILD SUCCESSFUL`). Commit: `fa9e11d` (y `a24cd0d` para dejar de rastrear `.idea/`).
 
-### Tarea 1b — Detekt y `AC-36`
-- **Objetivo:** Configurar Detekt y una verificación que prohíba `Float` y `Double` en `:domain` (y en importes), demostrando primero que falla ante un caso de prueba con `Double`/`Float` y luego pasando en limpio.
+### Tarea 1b — Detekt y `AC-36` *(Hecha)*
+- **Objetivo:** Configurar Detekt (`1.23.8`) en `:domain` y la prueba JUnit `NoFloatingPointTypesTest` que prohíbe `Float` y `Double` en `domain/src/main/kotlin`.
 - **Requisitos / Reglas:** `§0` (Dinero como `Long`), `§10.1`.
-- **AC:** `AC-36`.
-- **Archivos / Módulos:** `config/detekt/detekt.yml`, `build.gradle.kts`, prueba/tarea de verificación de `AC-36`.
-- **Verificación:** Demostración del fallo con caso de prueba y ejecución en verde tras limpiarlo.
+- **AC:** `AC-36` (cubierto por `NoFloatingPointTypesTest`, con `detekt` como complemento).
+- **Archivos / Módulos:** `config/detekt/detekt.yml`, `build.gradle.kts`, `gradle/libs.versions.toml`, `domain/build.gradle.kts`, `domain/src/test/kotlin/com/egglytics/domain/NoFloatingPointTypesTest.kt`.
+- **Verificación:** Fallo demostrado con archivo temporal con `Double`, archivo borrado y `.\gradlew.bat clean :domain:detekt :domain:test` → `BUILD SUCCESSFUL`. Commit: `f5dff57`.
+- **Mejora menor pendiente:** Asegurar que el detalle `archivo:línea` del fallo de `NoFloatingPointTypesTest` se imprima completo en consola de Gradle (por ejemplo configurando `testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }` en `:domain`) sin necesidad de abrir el reporte HTML/XML.
 
 ### Tarea 2 — Modelos base y lógica pura de dominio (Fase 1)
-- **Objetivo:** Implementar en `:domain` las enumeraciones (`EggClassification`, `FeedIngredient`, `MemberRole`, `PaymentType`), fechas operativas (`YYYY-MM-DD` en `America/Bogota`), modelos (`Member`, `Price`, `ExpenseCategory`, `PaymentMethod`) y el caso de uso de precio vigente por `fechaOperativa` con desempate por `createdAt`.
+- **Objetivo:** Implementar en `:domain` (Kotlin puro, sin Android ni Firebase) los tipos base de Fase 1 y la función pura de selección de precio vigente.
+  - **Tipos incluidos:**
+    - `EggClassification` (`B`, `A`, `AA`, `AAA`, `JUMBO`), `FeedIngredient` (`CONCENTRATE`, `CORN_BRAN`), `MemberRole` (`ADMIN`, `OPERATOR`), `PaymentType` (`PAYMENT`, `REFUND`, `OVERPAYMENT_REFUND`).
+    - `OperationalDate` (utilitario puro para `LocalDate` ↔ `String YYYY-MM-DD` y zona `America/Bogota`).
+    - `Member`, `Price` (`pricePerBucket: Long > 0L`, `validFrom: LocalDate`, `createdAt: Instant`), `ExpenseCategory`, `PaymentMethod`.
+    - `ActivePriceResult` (`sealed interface`: `Found(price)` / `NotFound`, para forzar el manejo explícito de `R-04` «sin precio no se permite vender») y `GetActivePriceUseCase` (función pura que recibe `fechaOperativa: LocalDate` sin usar reloj del sistema).
+  - **Tipos fuera de Tarea 2 (Fases 2 y 3):** movimientos operativos (`Harvest`, `Sale`, `Payment`, `SaleReturn`, `EggOutflow`, `Feed*`, `Expense`, `Withdrawal`, `Count`, `Closing`, `Reversal`, `OpeningBalance`, `Customer`) y cálculos de saldos/alertas/CSV.
+  - **Frontera con `:data`:** La conversión entre `String YYYY-MM-DD` / `Timestamp` de Firestore y `LocalDate` / `Instant` de dominio es responsabilidad de la capa `data` (Tarea 5).
 - **Requisitos / Reglas:** `RF-04`, `R-02`, `R-04`, `D-02`, `D-03`, `D-04`.
 - **AC:** `AC-04` (catálogo), `AC-39`.
+- **Casos de prueba de precio vigente:** coincidencia exacta (`validFrom == fechaOperativa`), vigente anterior, frontera futura (`validFrom == fechaOperativa + 1 día` excluido), fecha fija lejana (`2030`) demostrando independencia del reloj del sistema, cambio de catálogo (`AC-04`), empate en `validFrom` desempatado por `createdAt`, empate doble (`validFrom` y `createdAt` iguales) desempatado determinísticamente por `id` mayor, lista en orden aleatorio (mismo resultado), `NotFound` (lista vacía / solo futuros / otra clasificación), aislamiento por clasificación y rechazo de `pricePerBucket <= 0L`.
 - **Archivos / Módulos:** `domain/src/main/kotlin/...`, `domain/src/test/kotlin/...`.
-- **Verificación:** Pruebas JUnit escritas primero (fallan) y luego en verde.
+- **Verificación:** Pruebas JUnit escritas primero (fallan) y luego en verde (`.\gradlew.bat :domain:detekt :domain:test`).
 
 ### Tarea 3a — Reglas mínimas de Firestore y pruebas base
 - **Objetivo:** Crear `firestore.rules` con las funciones base (`memberData`, `businessData`, `isActive`, `isAdmin`, `isOperator`, `validDate`, `validDeviceTime`, `validMovement`) y las reglas de `businesses`, `members` (solo lectura para miembros activos) y `payments` (sus 3 tipos con lista cerrada de campos), más la configuración del proyecto de pruebas TypeScript/Node con `@firebase/rules-unit-testing`.
