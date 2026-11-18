@@ -34,7 +34,7 @@ class OperationalDateTest {
             "2026-11-18T10:00:00Z",
         )
         invalidInputs.forEach { raw ->
-            assertThrows("Debió rechazar '$raw'", IllegalArgumentException::class.java) {
+            assertThrows("Debio rechazar '$raw'", IllegalArgumentException::class.java) {
                 OperationalDate.parse(raw)
             }
         }

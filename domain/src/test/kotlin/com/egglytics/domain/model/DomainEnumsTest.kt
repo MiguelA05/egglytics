@@ -69,4 +69,12 @@ class DomainEnumsTest {
         assertThrows(IllegalArgumentException::class.java) { MemberRole.fromCode("viewer") }
         assertThrows(IllegalArgumentException::class.java) { PaymentType.fromCode("credit") }
     }
+
+    @Test
+    fun `fromCode is case sensitive and rejects wrong casing`() {
+        assertThrows(IllegalArgumentException::class.java) { EggClassification.fromCode("b") }
+        assertThrows(IllegalArgumentException::class.java) { EggClassification.fromCode("jumbo") }
+        assertThrows(IllegalArgumentException::class.java) { MemberRole.fromCode("ADMIN") }
+        assertThrows(IllegalArgumentException::class.java) { FeedIngredient.fromCode("Concentrate") }
+    }
 }
