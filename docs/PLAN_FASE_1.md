@@ -17,12 +17,13 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 2. **Tarea 1b (Hecha — `f5dff57`):** Detekt `1.23.8` y `NoFloatingPointTypesTest` (`AC-36`) en `:domain`.
 3. **Tarea 2a (Hecha — `c23ea8f`):** Enumeraciones (`EggClassification`, `FeedIngredient`, `MemberRole`, `PaymentType`) y `OperationalDate` en `:domain`.
 4. **Tarea 2b (Hecha — `fb2b85e`):** Modelos (`Member`, `Price`, `ExpenseCategory`, `PaymentMethod`), `ActivePriceResult` y `GetActivePriceUseCase` en `:domain`.
-4. **Tarea 3a:** Reglas mínimas de Firestore (`members`, `businesses`, `payments` y `validMovement`) con sus pruebas en `@firebase/rules-unit-testing`.
-5. **Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).
-6. **Tarea 3b:** Resto de reglas de Firestore (`prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y demás colecciones) y sus AC en el emulador.
-7. **Tarea 5:** Capa `data`: inicialización de Firestore offline (`CACHE_SIZE_UNLIMITED`), Firebase Auth y repositorio de sesión/miembros probado en Kotlin contra el emulador.
-8. **Tarea 6:** Estado básico de sincronización (`RF-02` básico) y aviso al cerrar sesión con pendientes.
-9. **Tarea 7:** Capa `data` y `ui`: Login, navegación por rol y pantallas de Catálogos (solo Administrador).
+5. **Tarea 3a-1:** Configuración de emulador y suite TypeScript (`firebase.json`, `firestore-tests/`, `.gitignore`) con 1 prueba trivial de reglas.
+6. **Tarea 3a-2:** Reglas mínimas de Firestore (`members`, `businesses`, `payments`, `validMovement` y regla provisional de `saleReturns`) con sus pruebas en `@firebase/rules-unit-testing`.
+7. **Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).
+8. **Tarea 3b:** Resto de reglas de Firestore (`prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y demás colecciones) y sus AC en el emulador.
+9. **Tarea 5:** Capa `data`: inicialización de Firestore offline (`CACHE_SIZE_UNLIMITED`), Firebase Auth y repositorio de sesión/miembros probado en Kotlin contra el emulador.
+10. **Tarea 6:** Estado básico de sincronización (`RF-02` básico) y aviso al cerrar sesión con pendientes.
+11. **Tarea 7:** Capa `data` y `ui`: Login, navegación por rol y pantallas de Catálogos (solo Administrador).
 
 ## 3. Detalle de tareas (una por commit)
 
@@ -58,11 +59,17 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **Verificación:** `.\gradlew.bat clean :domain:detekt :domain:test` → `BUILD SUCCESSFUL` (25 pruebas en verde, `detekt` sin hallazgos). Commit: `fb2b85e`.
 - **Mejora menor pendiente:** Que la prueba de orden aleatorio en `GetActivePriceUseCaseTest` use varias permutaciones (lista invertida y varias semillas distintas), en lugar de una sola semilla (`Random(42)`).
 
-### Tarea 3a — Reglas mínimas de Firestore y pruebas base
-- **Objetivo:** Crear `firestore.rules` con las funciones base (`memberData`, `businessData`, `isActive`, `isAdmin`, `isOperator`, `validDate`, `validDeviceTime`, `validMovement`) y las reglas de `businesses`, `members` (solo lectura para miembros activos) y `payments` (sus 3 tipos con lista cerrada de campos), más la configuración del proyecto de pruebas TypeScript/Node con `@firebase/rules-unit-testing`.
+### Tarea 3a-1 — Configuración del emulador y prueba trivial
+- **Objetivo:** Configurar `firebase.json` (Firestore Emulator `127.0.0.1:8080`, proyecto `demo-egglytics-test`), `firestore.rules` mínimo de arranque, `firestore-tests/` (TypeScript + `@firebase/rules-unit-testing`), `.gitignore` (`firestore-tests/node_modules/`) y una prueba trivial que arranque el emulador y pase, para validar Node 24 y JDK 21.
+- **Archivos / Módulos:** `firebase.json`, `firestore.rules`, `firestore-tests/package.json`, `firestore-tests/tsconfig.json`, `firestore-tests/test/smoke.test.ts`, `.gitignore`.
+- **Verificación:** `firebase emulators:exec --only firestore "npm test"` en verde.
+
+### Tarea 3a-2 — Reglas mínimas de Firestore y pruebas base
+- **Objetivo:** Completar `firestore.rules` con las funciones base (`memberData`, `businessData`, `isActive`, `isAdmin`, `isOperator`, `validDate`, `validDeviceTime`, `validMovement`) y las reglas de `businesses`, `members` (solo lectura para miembros activos), `payments` (sus 3 tipos con lista cerrada de campos) y una regla temporal en `saleReturns` marcada con el comentario `// PROVISIONAL: sustituir en la Tarea 3b`.
+  - *Nota de lecturas:* `validMovement` lee `businessData(b).startDate`, lo que añade 1 lectura por escritura; la **Tarea 4** mide si este costo/límite es aceptable antes de darlo por definitivo.
 - **Requisitos / Reglas:** `RF-01`, `RF-05`, `R-07`, `R-09`, `R-22`, `§11.1`.
-- **AC:** `AC-32`, `AC-35`, `AC-57`, `AC-65` (y parte de `AC-33`, `AC-34`).
-- **Archivos / Módulos:** `firebase.json`, `firestore.rules`, `firestore-tests/` (`package.json`, `tsconfig.json`, `test/*.test.ts`).
+- **AC:** `AC-32`, `AC-35`, `AC-57`, `AC-65` (y parciales de `AC-33`, `AC-34`, `AC-52`).
+- **Archivos / Módulos:** `firestore.rules`, `firestore-tests/test/payments_and_base.test.ts`.
 - **Verificación:** Pruebas contra Firebase Emulator Suite escritas primero y en verde.
 
 ### Tarea 4 — Medición de accesos a documentos en reglas con lotes grandes
