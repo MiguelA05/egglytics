@@ -1,0 +1,3 @@
+# Configuración mínima para :domain (sobre buildUponDefaultConfig = true)
+build:
+  maxIssues: 0

@@ -3,6 +3,13 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("java-library")
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.detekt)
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("${rootProject.projectDir}/config/detekt/detekt.yml"))
+    source.setFrom("src/main/kotlin", "src/test/kotlin")
 }
 
 java {
