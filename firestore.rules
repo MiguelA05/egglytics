@@ -1,13 +1,93 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function memberData(b) {
+      return get(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid)).data;
+    }
+    function businessData(b) {
+      return get(/databases/$(database)/documents/businesses/$(b)).data;
+    }
+    function isActive(b) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid))
+        && memberData(b).active == true;
+    }
+    function isAdmin(b) { return isActive(b) && memberData(b).role == 'admin'; }
+    function isOperator(b) { return isActive(b) && memberData(b).role in ['admin', 'operator']; }
+
+    // Fecha YYYY-MM-DD con mes 01-12 y día válido para el mes.
+    // El 29 de febrero de años no bisiestos se valida solo en la app.
+    function validDate(s) {
+      return s is string
+        && s.matches('^[0-9]{4}-((0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30)|02-(0[1-9]|1[0-9]|2[0-9]))$');
+    }
+    // R-22: createdAt no puede estar más de 5 minutos en el futuro.
+    function validDeviceTime(t) {
+      return t is timestamp && t <= request.time + duration.value(5, 'm');
+    }
+
+    function validMovement(b) {
+      let d = request.resource.data;
+      return isOperator(b)
+        && d.createdBy == request.auth.uid
+        && validDate(d.fechaOperativa)
+        && d.fechaOperativa >= businessData(b).startDate
+        && validDeviceTime(d.createdAt)
+        && d.syncedAt == request.time;
+    }
+
     match /smoke/{id} {
       allow read: if request.auth != null;
       allow write: if false;
     }
 
-    match /{document=**} {
-      allow read, write: if false;
+    match /businesses/{b} {
+      allow read: if isActive(b);
+      allow write: if false;
+
+      match /members/{uid} {
+        allow read: if isActive(b);
+        allow write: if false;
+      }
+
+      match /payments/{id} {
+        // Lista cerrada de campos por tipo (§8.3).
+        function validPaymentByType(d) {
+          return (d.type == 'payment'
+                && d.keys().hasOnly(['fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+                     'saleId', 'openingDebtId', 'amount', 'methodId', 'type']))
+            || (d.type == 'refund'
+                && d.keys().hasOnly(['fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+                     'saleId', 'amount', 'methodId', 'type', 'saleReturnId'])
+                && d.get('saleId', null) is string
+                && d.get('saleReturnId', null) is string
+                // La devolución debe existir al terminar el lote (mismo WriteBatch, R-09).
+                && existsAfter(/databases/$(database)/documents/businesses/$(b)/saleReturns/$(d.saleReturnId)))
+            || (d.type == 'overpayment_refund'
+                && isAdmin(b)
+                && d.keys().hasOnly(['fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+                     'saleId', 'openingDebtId', 'amount', 'methodId', 'type', 'reason'])
+                && d.get('reason', null) is string
+                && d.reason.size() > 0);
+        }
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.methodId is string
+          && request.resource.data.methodId.size() > 0
+          && request.resource.data.type in ['payment', 'refund', 'overpayment_refund']
+          && ((request.resource.data.get('saleId', null) is string)
+              != (request.resource.data.get('openingDebtId', null) is string))
+          && validPaymentByType(request.resource.data);
+      }
+
+      // PROVISIONAL: sustituir en la Tarea 3b
+      match /saleReturns/{id} {
+        allow read: if isActive(b);
+        allow create: if validMovement(b);
+      }
     }
   }
 }
