@@ -23,6 +23,7 @@ const BUSINESS_ID = "egglytics_default";
 const ADMIN_UID = "admin_1";
 const OPERATOR_UID = "operator_1";
 const INACTIVE_UID = "inactive_1";
+const VIEWER_UID = "viewer_1";
 const STRANGER_UID = "stranger_1";
 
 let testEnv: RulesTestEnvironment;
@@ -77,6 +78,13 @@ async function seedTestData(
       email: "inactivo@example.com",
       role: "operator",
       active: false,
+      createdAt: Timestamp.now(),
+    });
+    await setDoc(doc(db, `businesses/${BUSINESS_ID}/members/${VIEWER_UID}`), {
+      name: "Solo Lectura",
+      email: "viewer@example.com",
+      role: "viewer",
+      active: true,
       createdAt: Timestamp.now(),
     });
     await setDoc(doc(db, `businesses/${BUSINESS_ID}/sales/sale_1`), {
@@ -508,6 +516,25 @@ describe("Task 3a-2: Firestore minimal rules (businesses, members, payments, val
           saleReturnId: "sr_1",
           amount: 5000,
         }),
+      ),
+    );
+  });
+
+  it("11 (RF-29, AC-33): active member with role viewer can read business but cannot create payment (twin: operator creates)", async () => {
+    const viewerDb = testEnv.authenticatedContext(VIEWER_UID).firestore();
+    const operatorDb = testEnv.authenticatedContext(OPERATOR_UID).firestore();
+
+    await assertSucceeds(getDoc(doc(viewerDb, `businesses/${BUSINESS_ID}`)));
+    await assertFails(
+      setDoc(
+        doc(viewerDb, `businesses/${BUSINESS_ID}/payments/p_viewer_denied`),
+        basePayment({ createdBy: VIEWER_UID }),
+      ),
+    );
+    await assertSucceeds(
+      setDoc(
+        doc(operatorDb, `businesses/${BUSINESS_ID}/payments/p_operator_allowed`),
+        basePayment({ createdBy: OPERATOR_UID }),
       ),
     );
   });

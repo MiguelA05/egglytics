@@ -2,19 +2,24 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function memberData(b) {
-      return get(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid)).data;
+    function memberDoc(b) {
+      return get(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid));
     }
     function businessData(b) {
       return get(/databases/$(database)/documents/businesses/$(b)).data;
     }
     function isActive(b) {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid))
-        && memberData(b).active == true;
+      let m = memberDoc(b);
+      return request.auth != null && m != null && m.data.active == true;
     }
-    function isAdmin(b) { return isActive(b) && memberData(b).role == 'admin'; }
-    function isOperator(b) { return isActive(b) && memberData(b).role in ['admin', 'operator']; }
+    function isAdmin(b) {
+      let m = memberDoc(b);
+      return request.auth != null && m != null && m.data.active == true && m.data.role == 'admin';
+    }
+    function isOperator(b) {
+      let m = memberDoc(b);
+      return request.auth != null && m != null && m.data.active == true && m.data.role in ['admin', 'operator'];
+    }
 
     // Fecha YYYY-MM-DD con mes 01-12 y día válido para el mes.
     // El 29 de febrero de años no bisiestos se valida solo en la app.
