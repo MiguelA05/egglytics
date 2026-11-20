@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit && node --test test/*.test.ts"
+    "test": "tsc --noEmit && node --test test/*.test.ts",
+    "measure": "tsc --noEmit && node measure/batch_limits.ts"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "6.0.0",
