@@ -17,9 +17,9 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 2. **Tarea 1b (Hecha — `f5dff57`):** Detekt `1.23.8` y `NoFloatingPointTypesTest` (`AC-36`) en `:domain`.
 3. **Tarea 2a (Hecha — `c23ea8f`):** Enumeraciones (`EggClassification`, `FeedIngredient`, `MemberRole`, `PaymentType`) y `OperationalDate` en `:domain`.
 4. **Tarea 2b (Hecha — `fb2b85e`):** Modelos (`Member`, `Price`, `ExpenseCategory`, `PaymentMethod`), `ActivePriceResult` y `GetActivePriceUseCase` en `:domain`.
-5. **Tarea 3a-1:** Configuración de emulador y suite TypeScript (`firebase.json`, `firestore-tests/`, `.gitignore`) con 1 prueba trivial de reglas.
-6. **Tarea 3a-2:** Reglas mínimas de Firestore (`members`, `businesses`, `payments`, `validMovement` y regla provisional de `saleReturns`) con sus pruebas en `@firebase/rules-unit-testing`.
-7. **Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).
+5. ~~**Tarea 3a-1:** Configuración de emulador y suite TypeScript (`firebase.json`, `firestore-tests/`, `.gitignore`) con 1 prueba trivial de reglas.~~ *(Hecha en `72077bb`)*
+6. ~~**Tarea 3a-2:** Reglas mínimas de Firestore (`members`, `businesses`, `payments`, `validMovement` y regla provisional de `saleReturns`) con sus pruebas en `@firebase/rules-unit-testing`.~~ *(Hecha en `be8a80b`)*
+7. ~~**Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).~~ *(Hecha — pendiente de commit)*
 8. **Tarea 3b:** Resto de reglas de Firestore (`prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y demás colecciones) y sus AC en el emulador.
 9. **Tarea 5:** Capa `data`: inicialización de Firestore offline (`CACHE_SIZE_UNLIMITED`), Firebase Auth y repositorio de sesión/miembros probado en Kotlin contra el emulador.
 10. **Tarea 6:** Estado básico de sincronización (`RF-02` básico) y aviso al cerrar sesión con pendientes.
@@ -59,30 +59,47 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 - **Verificación:** `.\gradlew.bat clean :domain:detekt :domain:test` → `BUILD SUCCESSFUL` (25 pruebas en verde, `detekt` sin hallazgos). Commit: `fb2b85e`.
 - **Mejora menor pendiente:** Que la prueba de orden aleatorio en `GetActivePriceUseCaseTest` use varias permutaciones (lista invertida y varias semillas distintas), en lugar de una sola semilla (`Random(42)`).
 
-### Tarea 3a-1 — Configuración del emulador y prueba trivial
+### Tarea 3a-1 — Configuración del emulador y prueba trivial *(Hecha en `72077bb`)*
 - **Objetivo:** Configurar `firebase.json` (Firestore Emulator `127.0.0.1:8080`, proyecto `demo-egglytics-test`), `firestore.rules` mínimo de arranque, `firestore-tests/` (TypeScript + `@firebase/rules-unit-testing`), `.gitignore` (`firestore-tests/node_modules/`) y una prueba trivial que arranque el emulador y pase, para validar Node 24 y JDK 21.
 - **Archivos / Módulos:** `firebase.json`, `firestore.rules`, `firestore-tests/package.json`, `firestore-tests/tsconfig.json`, `firestore-tests/test/smoke.test.ts`, `.gitignore`.
-- **Verificación:** `firebase emulators:exec --only firestore "npm test"` en verde.
+- **Verificación:** `firebase emulators:exec --project demo-egglytics-test --only firestore "npm --prefix firestore-tests test"` en verde (`1 pass, 0 fail`).
 
-### Tarea 3a-2 — Reglas mínimas de Firestore y pruebas base
+### Tarea 3a-2 — Reglas mínimas de Firestore y pruebas base *(Hecha en `be8a80b`)*
 - **Objetivo:** Completar `firestore.rules` con las funciones base (`memberData`, `businessData`, `isActive`, `isAdmin`, `isOperator`, `validDate`, `validDeviceTime`, `validMovement`) y las reglas de `businesses`, `members` (solo lectura para miembros activos), `payments` (sus 3 tipos con lista cerrada de campos) y una regla temporal en `saleReturns` marcada con el comentario `// PROVISIONAL: sustituir en la Tarea 3b`.
-  - *Nota de lecturas:* `validMovement` lee `businessData(b).startDate`, lo que añade 1 lectura por escritura; la **Tarea 4** mide si este costo/límite es aceptable antes de darlo por definitivo.
 - **Requisitos / Reglas:** `RF-01`, `RF-05`, `R-07`, `R-09`, `R-22`, `§11.1`.
 - **AC:** `AC-32`, `AC-35`, `AC-57`, `AC-65` (y parciales de `AC-33`, `AC-34`, `AC-52`).
 - **Archivos / Módulos:** `firestore.rules`, `firestore-tests/test/payments_and_base.test.ts`.
-- **Verificación:** Pruebas contra Firebase Emulator Suite escritas primero y en verde.
+- **Verificación:** `17 tests, 2 suites, 17 pass, 0 fail` contra Firebase Emulator Suite.
+- **Hallazgos verificados en 3a-2:**
+  - **Sintaxis de `§11.1` confirmada en el emulador (`cloud-firestore-emulator v1.21.0`):** funciones declaradas dentro de `match /payments/{id}`, `existsAfter(...)` dentro de `WriteBatch`, `request.time + duration.value(5, 'm')`, `businessData(b).startDate` y la regex RE2 de `validDate` funcionan sin errores de compilación ni evaluación.
+  - **Limitación conocida (decisión A):** la regex de `validDate` valida formato `YYYY-MM-DD` y rangos básicos de mes/día, por lo que acepta fechas de calendario inválidas como `2026-02-29` (año no bisiesto); la validación de calendario exacto se mantiene en `:domain` (`OperationalDate`).
+  - **Pruebas de mutación (M1–M5, ejecutadas contra el emulador):**
+    - **M1** (quitar `d.createdBy == request.auth.uid` en `validMovement`): falla `4a/4b (AC-35)` — protege la autoría del movimiento (`createdBy` debe coincidir con el usuario autenticado).
+    - **M2** (quitar `&& isAdmin(b)` en `overpayment_refund` de `validPaymentByType`): falla `10a-10d (AC-65, AC-33)` en el caso `10b` — protege que solo `ADMIN` pueda emitir `overpayment_refund`.
+    - **M3** (relajar regex de `validDate` a `^.*$`): falla `7a/7b/7c (AC-57)` en el caso `7b` — protege el formato válido de `fechaOperativa`.
+    - **M4** (quitar `&& d.fechaOperativa >= businessData(b).startDate` en `validMovement`): fallan `5a/5b` y `5c` — protege que `fechaOperativa` no sea anterior a `startDate` del negocio.
+    - **M5** (quitar `existsAfter(...)` en `refund` de `validPaymentByType`): falla `9a-9d (AC-65)` en el caso `9c` — protege que todo `refund` esté atado atómicamente a un `saleReturn` existente tras el lote (`existsAfter`).
+  - **Costo de lecturas a medir en Tarea 4:** las reglas actuales leen `memberData(b)` (para `isActive`/`isAdmin`/`isOperator`) y `businessData(b).startDate` (en `validMovement`) en cada escritura; la **Tarea 4** mide el total de accesos por operación y por lote para confirmar si es aceptable respecto al límite oficial.
 
-### Tarea 4 — Medición de accesos a documentos en reglas con lotes grandes
+### Tarea 4 — Medición de accesos a documentos en reglas con lotes grandes *(Hecha)*
 - **Objetivo:**
-  1. Consultar la documentación oficial vigente de Firestore sobre límites de accesos a documentos (`get`/`exists`/`existsAfter`) por operación y por lote (`WriteBatch`) con su fuente, y verificar si el emulador aplica los mismos límites que producción (si algo no se puede confirmar, indicarlo sin suponerlo).
-  2. Medir en el emulador el número de accesos en:
-     - Abono repartido en 10 ventas pendientes (`WriteBatch` de 10 `payments`).
-     - Cierre con conteos (`WriteBatch` de 3 `counts` + 1 `closings`).
-     - Devolución con `refund` (`WriteBatch` de `saleReturns` + `payments` con `existsAfter`).
-  3. Decidir si `fechaOperativa >= businessData(b).startDate` permanece en `validMovement` o pasa solo a la app. Si cambia el diseño de `validMovement`, actualizar primero `§11.1` de `docs/ESPECIFICACION.md` y avisar antes de seguir.
+  1. Consultar la documentación oficial vigente de Firestore sobre límites de accesos a documentos (`get`/`exists`/`existsAfter`) por operación (10) y por lote (`WriteBatch`, 20), y verificar si el emulador aplica el mismo límite.
+  2. Medir en el emulador (`firestore-tests/measure/batch_limits.ts`) 4 variantes (`A`, `B`, `C`, `D`) con lotes crecientes de `1..30` pagos (`type == 'payment'`), devolución con `refund` (`1 saleReturns + 1 payment`) y cierre (`3 counts + 1 closings`).
+  3. Decidir sobre `startDate` y el formato de lectura de `members`.
 - **Requisitos / Reglas:** `§5.1`, `§11.1`, `§14.1`.
-- **AC:** Pruebas de medición de lotes en Emulador.
-- **Verificación:** Reporte con fuente oficial, mediciones y decisión documentada en `docs/ESPECIFICACION.md`.
+- **Archivos / Módulos:** `firestore-tests/measure/batch_limits.ts`, `firestore-tests/package.json` (script `measure`), `firestore-tests/tsconfig.json`.
+- **Resultados (calculado frente a medido):**
+
+| Variante | Descripción | Llamadas / pago *(doc)* | Máx. pagos / lote *(doc, caso peor)* | Máx. pagos / lote *(medido emulador)* | `1c-write` equiv. *(medido)* | `refundBatch` *(doc)* | `closingBatch` *(doc)* |
+|---|---|---:|---:|---:|---|---:|---:|
+| **A** | Actuales (`exists` + `2 get` miembro + `get startDate`) | 4 | 5 | `>= 30` | Denegado | 9 | 16 |
+| **B** | `1 get` miembro (sin `exists`) + `get startDate` | 2 | 10 | `>= 30` | Denegado | 5 | 8 |
+| **C** | `1 get` miembro (sin `exists`) sin `startDate` | 1 | 20 | `>= 30` | Denegado | 3 | 4 |
+| **D** | Claims en `request.auth.token` + `get startDate` | 1 | 20 | `>= 30` | Denegado | 3 | 4 |
+
+- **Conclusión de la medición:** **el emulador no aplica el límite de 20; manda la documentación** (caso peor: suma por escritura sin caché entre operaciones, tope de 20 por `WriteBatch` y 10 por operación).
+- **Decisión:** adoptar la **variante B** con tope de **10 pagos por lote** (presupuesto: máximo **2** llamadas de acceso por pago); un abono con más de 10 ventas pendientes se aplica en varios lotes atómicos de hasta 10 pagos.
+- **Verificación:** `firebase emulators:exec --project demo-egglytics-test --only firestore "npm --prefix firestore-tests run measure"` ejecutado con código de salida `0`.
 
 ### Tarea 3b — Resto de reglas de Firestore y sus AC
 - **Objetivo:** Completar `firestore.rules` con `prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y colecciones de movimientos, más `firestore.indexes.json`.
