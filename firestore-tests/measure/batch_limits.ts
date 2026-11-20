@@ -1,9 +1,10 @@
 /**
  * Script de medición de límites de lotes en Firestore Emulator (Tarea 4).
  *
- * IMPORTANTE: Este script depende del texto exacto de ../../firestore.rules.
- * Si firestore.rules cambia (por ejemplo en la Tarea 3b), los reemplazos
- * abortarán con un error explícito y habrá que actualizar los anclajes aquí.
+ * IMPORTANTE: Este script depende del texto exacto de ../../firestore.rules
+ * del commit be8a80b. Tras aplicar la variante B a firestore.rules, los reemplazos
+ * abortarán con un error explícito (comportamiento esperado, no es un fallo).
+ * Si se vuelve a ejecutar en el futuro, habrá que actualizar los anclajes aquí.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";

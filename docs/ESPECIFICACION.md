@@ -1,4 +1,4 @@
-# Especificación de Producto y Desarrollo v2.3
+# Especificación de Producto y Desarrollo v2.4
 
 Aplicación Android de gestión para el emprendimiento familiar de huevos
 
@@ -47,9 +47,9 @@ La operación cría gallinas, recoge y clasifica huevos, vende cubetas completas
 
 | Control del documento | Detalle |
 | --- | --- |
-| Versión | 2.3 (resuelve los pendientes de la 2.2 y fija D-09 y D-10) |
-| Fecha | 16 de noviembre de 2026 |
-| Estado | Lista para iniciar desarrollo asistido por IA. Las decisiones «Propuesta» de la sección 5 se usan tal como están; no quedan decisiones pendientes que bloqueen la Fase 1 (§16.2) |
+| Versión | 2.4 (variante B en reglas, presupuesto de accesos y abono en lotes de hasta 10 pagos) |
+| Fecha | 19 de noviembre de 2026 |
+| Estado | En desarrollo (Fase 1 en ejecución). Las decisiones «Propuesta» de la sección 5 se usan tal como están; no quedan decisiones de producto pendientes (§16.2) |
 | Plataforma | Android |
 | Usuarios | Hasta tres integrantes de la familia, un dispositivo cada uno |
 | Criterio rector | Registrar cada movimiento una sola vez, con formularios sencillos, historial trazable y sincronización posterior cuando el teléfono recupere internet |
@@ -154,7 +154,7 @@ Estas reglas son obligatorias y deben quedar cubiertas por pruebas, salvo las ma
 
 | Código | Regla |
 | --- | --- |
-| R-07 | Todo pago se asocia a una venta o a una deuda de apertura. Su monto es mayor que 0 y no supera el saldo pendiente de esa venta o deuda (no existe saldo a favor). Un abono general de un cliente se reparte de la deuda más antigua a la más reciente: primero las deudas de apertura y luego las ventas, ordenadas por `fechaOperativa` y, a igual fecha, por `createdAt`. Se crea un pago por cada deuda cubierta, todo en un solo `WriteBatch`. Si el abono excede la deuda total del cliente, se rechaza. La app garantiza que `PendienteVenta` no quede negativo al confirmar en un mismo dispositivo; si por concurrencia sin conexión queda negativo, se dispara A-10 y el administrador lo corrige con un reintegro por sobrepago (`type: overpayment_refund`), con motivo obligatorio y sin `saleReturnId` (§8.3). |
+| R-07 | Todo pago se asocia a una venta o a una deuda de apertura. Su monto es mayor que 0 y no supera el saldo pendiente de esa venta o deuda (no existe saldo a favor). Un abono general de un cliente se reparte de la deuda más antigua a la más reciente: primero las deudas de apertura y luego las ventas, ordenadas por `fechaOperativa` y, a igual fecha, por `createdAt`. El rechazo por exceder la deuda total del cliente se comprueba antes de enviar el primer lote. Se crea un pago por cada deuda cubierta, repartido en uno o varios `WriteBatch` atómicos de hasta 10 pagos cada uno (§10.2); si un lote posterior falla, los anteriores permanecen, se muestra el saldo restante y el usuario puede repetir el abono por el resto. La app garantiza que `PendienteVenta` no quede negativo al confirmar en un mismo dispositivo; si por concurrencia sin conexión queda negativo, se dispara A-10 y el administrador lo corrige con un reintegro por sobrepago (`type: overpayment_refund`), con motivo obligatorio y sin `saleReturnId` (§8.3). |
 | R-08 | Una venta sin cliente registrado debe quedar pagada por completo al confirmarla. Una venta con saldo pendiente exige cliente. |
 | R-09 | Una devolución solo aplica a cubetas de una venta ya entregada, indicando clasificación y cantidad de cubetas (sin superar lo vendido menos lo ya devuelto). Genera un crédito igual a cubetas por precio aplicado. El usuario indica si los huevos reingresan al inventario o se pierden. Si el crédito supera lo pendiente de esa venta, el excedente se reintegra obligatoriamente con un pago `type: refund` sobre esa venta (`saleId`) y con `saleReturnId` igual al ID de la devolución, en el mismo `WriteBatch` que la devolución. El tipo `refund` solo nace de una devolución; los sobrepagos se corrigen con `overpayment_refund` (R-07). El crédito nunca se aplica a otras ventas del cliente y `PendienteVenta` nunca queda negativo al confirmar (§9.4). |
 
@@ -302,7 +302,7 @@ Validaciones: cubetas enteras mayores a 0, precio mayor a 0, un pago nunca mayor
 ### 7.4 Cobrar y clientes
 
 - Lista de clientes con saldo; al abrir uno se ven sus ventas, pagos, devoluciones y saldo.
-- Registrar pago de una venta o de una deuda de apertura, o abono general que se reparte automáticamente (R-07), mostrando el reparto antes de confirmar; si el abono excede la deuda total, no se permite confirmar.
+- Registrar pago de una venta o de una deuda de apertura, o abono general que se reparte automáticamente (R-07), mostrando el reparto antes de confirmar; si el abono excede la deuda total, no se permite confirmar (se rechaza antes de enviar el primer lote). Si el abono supera 10 deudas se envía en lotes de hasta 10 pagos; si un lote posterior falla, los anteriores permanecen, la pantalla muestra el saldo restante y el usuario puede repetir el abono por el resto.
 - Crear, editar y (administrador) desactivar clientes; teléfono opcional.
 - Lista de entregas pendientes con botón para marcar como entregada.
 - (Administrador) Reintegro por sobrepago sobre una venta o deuda de apertura con A-10: monto, forma de pago y motivo obligatorio (R-07).
@@ -604,7 +604,7 @@ La app es un cliente Android que habla directamente con Firebase, sin servidor p
 1. Cada movimiento es un documento independiente e inmutable, con ID creado en el dispositivo; un reintento no duplica porque reescribe el mismo ID.
 2. La interfaz lee siempre del estado local mediante listeners con metadatos y muestra «pendiente de sincronizar» cuando `hasPendingWrites` es verdadero.
 3. No se espera (`await`) la tarea de escritura de Firestore en la UI; sin conexión no se completa hasta reconectar. Única excepción: la apertura (§5.1), en la que la app tampoco espera la tarea, sino que observa con un listener de metadatos los documentos de `openingBalances`. Cada teléfono bloquea los movimientos con el aviso «Esperando apertura» hasta recibir una apertura activa con `isFromCache == false` y `hasPendingWrites == false`; si la escritura de la apertura se rechaza, el bloqueo se levanta con el error de RF-31 (punto 11).
-4. Las operaciones de varios documentos (abono repartido, devolución con `refund`, anulación conjunta de una devolución y su `refund`, cierre con conteos) usan `WriteBatch`, que funciona sin conexión. No se usan transacciones, que requieren servidor.
+4. Las operaciones de varios documentos (abono repartido, devolución con `refund`, anulación conjunta de una devolución y su `refund`, cierre con conteos) usan `WriteBatch`, que funciona sin conexión. No se usan transacciones, que requieren servidor. Presupuesto de accesos a documentos en reglas (peor caso sin caché, tope oficial de 20 por lote y 10 por operación): `payment` = **2** (miembro + negocio), `refund` = **3** (+ `existsAfter`), `overpayment_refund` = **3** (miembro + negocio en `validMovement` + miembro en `isAdmin`); devolución con `refund` = **5**; cierre (`3 counts + 1 closings`) = **8**. El tope de **10 pagos por lote** aplica al abono repartido (solo `type: payment`, constante `MAX_PAYMENTS_PER_BATCH = 10` en `:domain`). *Advertencia:* el emulador local no valida el límite de 20 accesos por lote; en la **Tarea 5** queda pendiente verificar en un proyecto real de Firebase lotes de **10, 11 y 20 pagos** con la variante B desplegada.
 5. Ningún saldo compartido se actualiza como dato único; al llegar cambios de otros teléfonos, los saldos se recalculan y se levantan alertas (inventario negativo, diferencias, registros tardíos, pagos que exceden el saldo).
 6. Durante una caída de internet solo un teléfono designado registra ventas de huevos (D-06). Es un acuerdo operativo no automatizable: la app no lo controla. Los demás pueden consultar y registrar otros movimientos.
 7. `syncedAt` usa `serverTimestamp()` y se valida en las reglas igual a `request.time`; `fechaOperativa` y `createdAt` salen del dispositivo, y las reglas rechazan un `createdAt` mayor que `request.time` más 5 minutos (R-22).
@@ -637,26 +637,31 @@ Los datos solo los ve y escribe un miembro activo del negocio, y las reglas de F
 
 ### 11.1 Borrador de reglas de Firestore
 
-Es un punto de partida que la IA debe completar (validar tipos y rangos de cada colección con el mismo patrón que `sales`, `payments` y `customers`) y probar con Firebase Emulator Suite. Las reglas se aplican con permisos de lectura para todos los miembros activos y escritura solo por creación, salvo las excepciones indicadas. La ruta usa el `businessId` fijo de `BuildConfig` (D-15); no se necesitan reglas de grupo de colecciones.
+Es un punto de partida que la IA debe completar (validar tipos y rangos de cada colección con el mismo patrón que `sales`, `payments` y `customers`) y probar con Firebase Emulator Suite. Las reglas se aplican con permisos de lectura para todos los miembros activos y escritura solo por creación, salvo las excepciones indicadas. La ruta usa el `businessId` fijo de `BuildConfig` (D-15); no se necesitan reglas de grupo de colecciones. Presupuesto de accesos por escritura en el peor caso (variante B, un solo `get()` del miembro): `payment` = 2, `refund` = 3, `overpayment_refund` = 3, devolución con `refund` = 5, cierre (`3 counts + 1 closings`) = 8 (tope de 10 pagos por lote para abonos de `type: payment`).
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function memberData(b) {
-      return get(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid)).data;
+    function memberDoc(b) {
+      return get(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid));
     }
     function businessData(b) {
       return get(/databases/$(database)/documents/businesses/$(b)).data;
     }
     function isActive(b) {
-      return request.auth != null
-        && exists(/databases/$(database)/documents/businesses/$(b)/members/$(request.auth.uid))
-        && memberData(b).active == true;
+      let m = memberDoc(b);
+      return request.auth != null && m != null && m.data.active == true;
     }
-    function isAdmin(b) { return isActive(b) && memberData(b).role == 'admin'; }
-    function isOperator(b) { return isActive(b) && memberData(b).role in ['admin', 'operator']; }
+    function isAdmin(b) {
+      let m = memberDoc(b);
+      return request.auth != null && m != null && m.data.active == true && m.data.role == 'admin';
+    }
+    function isOperator(b) {
+      let m = memberDoc(b);
+      return request.auth != null && m != null && m.data.active == true && m.data.role in ['admin', 'operator'];
+    }
 
     // Fecha YYYY-MM-DD con mes 01-12 y día válido para el mes.
     // El 29 de febrero de años no bisiestos se valida solo en la app.
@@ -894,7 +899,9 @@ Quedan fuera de las tablas de pruebas porque se cumplen por diseño, por acuerdo
 | AC-06 | Venta parcial a un cliente | Saldo del cliente igual a total menos lo pagado | Unit |
 | AC-07 | Venta sin cliente con pago menor al total | No se puede confirmar (R-08) | Unit |
 | AC-08 | Pago mayor al saldo de la venta | Rechazado (R-07) | Unit |
-| AC-09 | Abono general con una deuda de apertura y tres ventas pendientes | Cubre primero la deuda de apertura y luego las ventas de la más antigua a la más reciente por `fechaOperativa` (a igual fecha, por `createdAt`); un pago por deuda cubierta, en un solo lote | Unit |
+| AC-09 | Abono general con una deuda de apertura y tres ventas pendientes | Cubre primero la deuda de apertura y luego las ventas de la más antigua a la más reciente por `fechaOperativa` (a igual fecha, por `createdAt`); un pago por deuda cubierta, en un solo lote (al ser hasta 10 pagos) | Unit |
+| AC-71 | Abono general que cubre 25 ventas pendientes (`MAX_PAYMENTS_PER_BATCH = 10` en `:domain`) | Se reparte en lotes de 10, 10 y 5 pagos; ningún lote supera 10 pagos; se conserva el orden de cobertura entre lotes (deudas de apertura primero, luego ventas de la más antigua a la más reciente por `fechaOperativa` y `createdAt`) (R-07, §10.2) | Unit |
+| AC-72 | Abono general mayor que la deuda total del cliente | Se rechaza antes de enviar y no genera ningún lote de pagos (R-07) | Unit |
 | AC-10 | Recolección de 100 AA, 20 A y 5 descartados | AA sube 100 y A sube 20; los descartados no cambian saldos y aparecen en reportes | Unit |
 | AC-11 | Devolver 1 cubeta AA de una venta entregada con reingreso | Crédito igual al precio aplicado; Físico AA sube 30; saldo del cliente baja el crédito | Unit |
 | AC-12 | Devolución sobre venta pendiente de entrega o por más cubetas de las vendidas | Rechazada | Unit |
@@ -986,8 +993,8 @@ El plan avanza por rebanadas usables y valida con datos reales antes de invertir
 | Fase | Entregable | Requisitos | Criterio de salida |
 | --- | --- | --- | --- |
 | 0. Validación | Saldos iniciales contados y anotados (D-09 y D-10 cerradas en v2.3; las «Propuesta» se usan tal como están) |  | La familia sabe qué registrar y cuándo |
-| 1. Fundamentos | Proyecto Android, Firebase en plan Spark, autenticación, miembros por consola, reglas con pruebas en emulador, catálogos, módulo `domain` base, revisión estática e indicador de sincronización básico. Incluye medir en el emulador si los lotes más grandes (abono repartido, cierre con conteos, devolución con reintegro) superan el límite de accesos a documentos de las reglas y, si lo superan, mover la validación de `startDate` a la app (§11.1) | RF-01, RF-02 (básico), RF-04, RF-05 | Acceso autorizado y datos protegidos; AC-32 a AC-36, AC-57 a AC-59, AC-64 y AC-65 pasan; medición de accesos documentada y decisión sobre `startDate` registrada en este documento |
-| 2. Rebanada A: huevos y cobros | Apertura (incluido el manejo de rechazo de RF-31 y el bloqueo «Esperando apertura»), recolección, venta, entrega, pagos, clientes, saldo y conteo de huevos | RF-03, RF-06 a RF-12, RF-31 (apertura) | Una jornada completa se registra en la app; AC-01 a AC-10, AC-21, AC-22, AC-25, AC-39, AC-40, AC-52, AC-68 y AC-70 pasan |
+| 1. Fundamentos | Proyecto Android, Firebase en plan Spark, autenticación, miembros por consola, reglas con pruebas en emulador, catálogos, módulo `domain` base, revisión estática e indicador de sincronización básico. Medición de accesos a documentos en reglas completada (decisión: variante B con `startDate` en reglas y tope de 10 pagos por lote, §10.2 y §11.1) | RF-01, RF-02 (básico), RF-04, RF-05 | Acceso autorizado y datos protegidos; AC-32 a AC-36, AC-57 a AC-59, AC-64 y AC-65 pasan; medición de accesos documentada y decisión sobre `startDate` registrada en este documento |
+| 2. Rebanada A: huevos y cobros | Apertura (incluido el manejo de rechazo de RF-31 y el bloqueo «Esperando apertura»), recolección, venta, entrega, pagos (`MAX_PAYMENTS_PER_BATCH = 10` en `:domain`), clientes, saldo y conteo de huevos | RF-03, RF-06 a RF-12, RF-31 (apertura) | Una jornada completa se registra en la app; AC-01 a AC-10, AC-21, AC-22, AC-25, AC-39, AC-40, AC-52, AC-68, AC-70, AC-71 y AC-72 pasan |
 | 3. Rebanada B: insumos y caja | Devoluciones, egresos de huevos, alimento, gastos, retiros, conteos de alimento y caja, cierre, historial y reversos | RF-13 a RF-22 | Alimento y dinero se concilian; AC-11 a AC-19, AC-23, AC-24, AC-26, AC-41, AC-43 a AC-45, AC-47 a AC-51, AC-62, AC-63, AC-66, AC-67 y AC-69 pasan |
 | 4. Rebanada C: confiabilidad | Sincronización completa, avisos de escrituras rechazadas, alertas, reportes, CSV y recordatorio de respaldo | RF-02 (completo), RF-23 a RF-26, RF-31 | Pruebas en modo avión pasan (AC-27 a AC-31, AC-38, AC-42, AC-53 a AC-56); la semana y el mes se revisan en Sheets (AC-20, AC-37, AC-46, AC-60 y AC-61) |
 | 5. Piloto | Uso real en paralelo con el cuaderno y ajuste de formularios | Todos | Captura consistente durante varias semanas y diferencias de conteo explicables; lecturas de Firestore de los saldos de cliente medidas en la consola. Si resultan caras, se evalúa un corte de cartera como mejora |
@@ -1063,7 +1070,7 @@ si algo es ambiguo, pregúntame antes de decidir.
 No quedan decisiones de producto pendientes que bloqueen la Fase 1. Solo quedan verificaciones técnicas o de piloto:
 
 - Verificar los precios y cuotas vigentes de Firestore antes de iniciar la Fase 1.
-- Medición de accesos a documentos en las reglas (Fase 1): verificar en el emulador si los lotes grandes superan el límite y decidir si la validación de `startDate` queda en las reglas o pasa a la app (§11.1).
+- Verificación en proyecto real de Firebase (Fase 1, Tarea 5): probar lotes de 10, 11 y 20 pagos (`type: payment`) con la variante B desplegada para confirmar el comportamiento del límite de 20 accesos en servidor (§10.2).
 - Medición de lecturas de saldos de cliente en el piloto (Fase 5): evaluar un corte de cartera si resulta caro (§10.3).
 - Reevaluación de D-10 al final del piloto: si el operador puede anular sus propios registros del mismo día. Las decisiones «Propuesta» de la sección 5 también pueden ajustarse durante el piloto actualizando primero este documento.
 
@@ -1149,6 +1156,14 @@ No quedan decisiones de producto pendientes que bloqueen la Fase 1. Solo quedan 
 | A-10 en ventas sin cliente limitada a la ventana de 7 días de Inicio (§8.5, §9.5, §15, AC-42) | Documentar la limitación aceptada de la v1 |
 | §16.2 limpiado: solo quedan pendientes de verificación o piloto (precios/cuotas, medición de lecturas en reglas, medición de saldos de cliente y reevaluación de D-10) | Los bloqueos de producto quedaron resueltos |
 
+#### Cambios de v2.3 a v2.4
+
+| Cambio | Motivo |
+| --- | --- |
+| §11.1 adopta la variante B (un `get()` del miembro con `let`, sin `exists()` previo) manteniendo `startDate` en `validMovement`; presupuesto de accesos documentado (`payment` = 2, `refund` = 3, `overpayment_refund` = 3, devolución+`refund` = 5, cierre = 8) (§10.2, §11.1) | La variante anterior (4 accesos por pago) limitaba el lote a 5 pagos según el tope oficial de 20 accesos por `WriteBatch` |
+| Abono repartido en uno o varios `WriteBatch` atómicos de hasta 10 pagos (`MAX_PAYMENTS_PER_BATCH = 10` en `:domain`); rechazo por exceso antes del primer lote; manejo de fallo parcial y nuevo `AC-71` (R-07, §7.4, §10.2, §14.1) | Permitir abonos con más de 10 deudas pendientes sin superar el límite de 20 accesos por `WriteBatch` |
+| §14.1, §16.2 y §16.4 actualizados: medición en emulador cerrada, verificación en proyecto real (10, 11 y 20 pagos) movida a Tarea 5 y referencia oficial de condiciones de reglas añadida | El emulador no valida el límite de 20 accesos por lote; la comprobación definitiva requiere proyecto real |
+
 ### 16.4 Referencias técnicas
 
 Revisarlas al iniciar el desarrollo, porque características y condiciones pueden cambiar.
@@ -1156,8 +1171,9 @@ Revisarlas al iniciar el desarrollo, porque características y condiciones puede
 - [Jetpack Compose (Android)](https://developer.android.com/develop/ui)
 - [Firestore: acceso sin conexión](https://firebase.google.com/docs/firestore/manage-data/enable-offline)
 - [Firestore: reglas de seguridad](https://firebase.google.com/docs/firestore/security/get-started)
+- [Firestore: condiciones de reglas de seguridad](https://firebase.google.com/docs/firestore/security/rules-conditions)
 - [Firestore: precios y cuotas](https://firebase.google.com/docs/firestore/pricing)
 - [Firebase Emulator Suite](https://firebase.google.com/docs/emulator-suite)
 - [Firebase App Distribution](https://firebase.google.com/docs/app-distribution)
 
-Fin de la especificación v2.3.
+Fin de la especificación v2.4.

@@ -87,7 +87,7 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
   2. Medir en el emulador (`firestore-tests/measure/batch_limits.ts`) 4 variantes (`A`, `B`, `C`, `D`) con lotes crecientes de `1..30` pagos (`type == 'payment'`), devolución con `refund` (`1 saleReturns + 1 payment`) y cierre (`3 counts + 1 closings`).
   3. Decidir sobre `startDate` y el formato de lectura de `members`.
 - **Requisitos / Reglas:** `§5.1`, `§11.1`, `§14.1`.
-- **Archivos / Módulos:** `firestore-tests/measure/batch_limits.ts`, `firestore-tests/package.json` (script `measure`), `firestore-tests/tsconfig.json`.
+- **Archivos / Módulos:** `firestore-tests/measure/batch_limits.ts` *(depende del texto exacto de `firestore.rules` del commit `be8a80b` y abortará tras aplicar B, lo cual es esperado y no un fallo)*, `firestore-tests/package.json` (script `measure`), `firestore-tests/tsconfig.json`.
 - **Resultados (calculado frente a medido):**
 
 | Variante | Descripción | Llamadas / pago *(doc)* | Máx. pagos / lote *(doc, caso peor)* | Máx. pagos / lote *(medido emulador)* | `1c-write` equiv. *(medido)* | `refundBatch` *(doc)* | `closingBatch` *(doc)* |
@@ -97,8 +97,14 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 | **C** | `1 get` miembro (sin `exists`) sin `startDate` | 1 | 20 | `>= 30` | Denegado | 3 | 4 |
 | **D** | Claims en `request.auth.token` + `get startDate` | 1 | 20 | `>= 30` | Denegado | 3 | 4 |
 
-- **Conclusión de la medición:** **el emulador no aplica el límite de 20; manda la documentación** (caso peor: suma por escritura sin caché entre operaciones, tope de 20 por `WriteBatch` y 10 por operación).
+- **Conclusión de la medición:** ninguna variante falló hasta 30 pagos; o el emulador no aplica el límite de 20 o cachea las rutas repetidas a lo largo del lote, y la medición no distingue entre ambas. En cualquier caso, el emulador no sirve para validar este límite; manda la documentación (caso peor: suma por escritura sin caché entre operaciones, tope de 20 por `WriteBatch` y 10 por operación).
 - **Decisión:** adoptar la **variante B** con tope de **10 pagos por lote** (presupuesto: máximo **2** llamadas de acceso por pago); un abono con más de 10 ventas pendientes se aplica en varios lotes atómicos de hasta 10 pagos.
+- **Pendiente tras aplicar B en `firestore.rules`:**
+  - Verificar si `m != null` es redundante en `isActive`/`isAdmin`/`isOperator` (en la medición, el emulador registró `"evaluation error"` al faltar el documento del miembro, lo que sugiere que `get()` sobre un documento inexistente provoca un error y la comparación nunca se ejecuta). Se probará quitando `m != null` y ejecutando las pruebas; si no falla nada, es código redundante (no afirmarlo como hecho en `ESPECIFICACION.md` hasta comprobarlo).
+  - Ejecutar 3 mutaciones sobre B (una por vez, restaurando tras cada una):
+    - **M6:** quitar `m.data.active == true` de `isOperator` → esperado: falla `1d-write`.
+    - **M7:** quitar `m.data.role == 'admin'` de `isAdmin` → esperado: falla `10b`.
+    - **M8:** quitar el chequeo de rol (`m.data.role in ['admin', 'operator']`) de `isOperator` → esperado: falla el caso `viewer` (`11`).
 - **Verificación:** `firebase emulators:exec --project demo-egglytics-test --only firestore "npm --prefix firestore-tests run measure"` ejecutado con código de salida `0`.
 
 ### Tarea 3b — Resto de reglas de Firestore y sus AC
