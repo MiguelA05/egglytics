@@ -56,6 +56,70 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Los precios no son movimientos: sin fechaOperativa ni restricción de startDate (§8.1).
+      match /prices/{id} {
+        function validPrice(d) {
+          return d.keys().hasOnly(['classification', 'pricePerBucket', 'validFrom',
+                                   'createdAt', 'createdBy', 'syncedAt', 'note'])
+            && d.classification in ['B', 'A', 'AA', 'AAA', 'JUMBO']
+            && d.pricePerBucket is int && d.pricePerBucket > 0
+            && validDate(d.validFrom)
+            && d.createdBy == request.auth.uid
+            && validDeviceTime(d.createdAt)
+            && d.syncedAt == request.time;
+        }
+        allow read: if isActive(b);
+        allow create: if isAdmin(b) && validPrice(request.resource.data);
+      }
+
+      match /harvests/{id} {
+        function validGradedMap(g) {
+          return g is map
+            && g.keys().hasOnly(['B', 'A', 'AA', 'AAA', 'JUMBO'])
+            && (!('B' in g) || (g.B is int && g.B >= 0))
+            && (!('A' in g) || (g.A is int && g.A >= 0))
+            && (!('AA' in g) || (g.AA is int && g.AA >= 0))
+            && (!('AAA' in g) || (g.AAA is int && g.AAA >= 0))
+            && (!('JUMBO' in g) || (g.JUMBO is int && g.JUMBO >= 0));
+        }
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'graded', 'discarded'])
+          && validGradedMap(request.resource.data.graded)
+          && request.resource.data.discarded is int
+          && request.resource.data.discarded >= 0;
+      }
+
+      match /sales/{id} {
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'customerId', 'lines', 'customerName', 'total', 'deliveryStatus', 'deliveredAt', 'deliveredBy'])
+          && request.resource.data.lines is list
+          && request.resource.data.lines.size() > 0
+          && request.resource.data.total is int
+          && request.resource.data.total > 0
+          && (
+            (request.resource.data.deliveryStatus == 'pending'
+              && !('deliveredAt' in request.resource.data)
+              && !('deliveredBy' in request.resource.data))
+            ||
+            (request.resource.data.deliveryStatus == 'delivered'
+              && request.resource.data.deliveredAt == request.resource.data.createdAt
+              && request.resource.data.deliveredBy == request.auth.uid)
+          );
+        allow update: if isOperator(b)
+          && resource.data.deliveryStatus == 'pending'
+          && request.resource.data.deliveryStatus == 'delivered'
+          && request.resource.data.deliveredBy == request.auth.uid
+          && validDeviceTime(request.resource.data.deliveredAt)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['deliveryStatus', 'deliveredAt', 'deliveredBy']);
+      }
+
       match /payments/{id} {
         // Lista cerrada de campos por tipo (§8.3).
         function validPaymentByType(d) {

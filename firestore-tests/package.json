@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit && node --test test/*.test.ts",
+    "test": "tsc --noEmit && node --test --test-concurrency=1 test/*.test.ts",
     "measure": "tsc --noEmit && node measure/batch_limits.ts"
   },
   "devDependencies": {
