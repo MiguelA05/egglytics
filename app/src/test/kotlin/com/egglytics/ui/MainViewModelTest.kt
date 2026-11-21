@@ -1,11 +1,14 @@
 package com.egglytics.ui
 
 import com.egglytics.data.model.Business
+import com.egglytics.data.repository.HarvestRepository
+import com.egglytics.data.repository.ObservedHarvest
 import com.egglytics.data.repository.PriceRepository
 import com.egglytics.data.repository.RejectionReason
 import com.egglytics.data.repository.SessionRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
+import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Member
 import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
@@ -23,6 +26,9 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -103,8 +109,9 @@ class MainViewModelTest {
                 ),
             ),
         )
+        val harvestRepo = FakeHarvestRepository()
 
-        val vm = MainViewModel(sessionRepo, priceRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
         advanceUntilIdle()
 
         vm.onEmailChange("operador@example.com")
@@ -139,8 +146,9 @@ class MainViewModelTest {
             },
         )
         val priceRepo = FakePriceRepository(emptyList())
+        val harvestRepo = FakeHarvestRepository()
 
-        val vm = MainViewModel(sessionRepo, priceRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
         advanceUntilIdle()
 
         vm.onEmailChange("stranger@example.com")
@@ -155,13 +163,48 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `submitHarvest validates quantities and distinguishes pending vs confirmed`() = runTest {
+        val sessionRepo = FakeSessionRepository(
+            initial = SessionState.Authenticated("operator_1", "operador@example.com", operatorMember, business),
+        )
+        val priceRepo = FakePriceRepository(emptyList())
+        val harvestRepo = FakeHarvestRepository()
+
+        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
+        advanceUntilIdle()
+
+        // Empty harvest rejected
+        vm.submitHarvest("h_empty")
+        assertNotNull(vm.uiState.value.harvestError)
+        assertTrue(harvestRepo.recordedIds.isEmpty())
+
+        // Valid harvest enqueued as pending, then confirmed
+        vm.onHarvestQtyChange(EggClassification.AA, "90")
+        vm.onHarvestQtyChange(EggClassification.A, "30")
+        vm.onDiscardedChange("4")
+        vm.onHarvestNoteChange("Recolección tarde")
+        vm.submitHarvest("h_custom_1")
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.harvestError)
+        assertEquals(listOf("h_custom_1"), harvestRepo.recordedIds)
+        assertEquals(1, vm.uiState.value.harvests.size)
+        assertTrue(vm.uiState.value.harvests.first().isPendingWrite)
+
+        harvestRepo.markConfirmed("h_custom_1")
+        advanceUntilIdle()
+        assertFalse(vm.uiState.value.harvests.first().isPendingWrite)
+    }
+
+    @Test
     fun `signOut resets session to Unauthenticated`() = runTest {
         val sessionRepo = FakeSessionRepository(
             initial = SessionState.Authenticated("operator_1", "operador@example.com", operatorMember, business),
         )
         val priceRepo = FakePriceRepository(emptyList())
+        val harvestRepo = FakeHarvestRepository()
 
-        val vm = MainViewModel(sessionRepo, priceRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
         advanceUntilIdle()
         assertTrue(vm.uiState.value.sessionState is SessionState.Authenticated)
 
@@ -195,5 +238,39 @@ class MainViewModelTest {
         private val flow = MutableStateFlow(initial)
         override fun observePrices(): Flow<List<Price>> = flow
         override suspend fun getPrices(): List<Price> = flow.value
+    }
+
+    private class FakeHarvestRepository : HarvestRepository {
+        private val flow = MutableStateFlow<List<ObservedHarvest>>(emptyList())
+        val recordedIds = mutableListOf<String>()
+
+        override fun observeHarvests(): Flow<List<ObservedHarvest>> = flow
+
+        override fun recordHarvest(
+            harvestId: String,
+            fechaOperativa: LocalDate,
+            graded: Map<EggClassification, Long>,
+            discarded: Long,
+            note: String?,
+            onWriteError: (String) -> Unit,
+        ) {
+            recordedIds.add(harvestId)
+            val harvest = Harvest(
+                id = harvestId,
+                fechaOperativa = fechaOperativa,
+                createdAt = Instant.parse("2026-11-21T15:00:00Z"),
+                createdBy = "operator_1",
+                graded = graded,
+                discarded = discarded,
+                note = note,
+            )
+            flow.value = listOf(ObservedHarvest(harvest = harvest, isPendingWrite = true)) + flow.value
+        }
+
+        fun markConfirmed(harvestId: String) {
+            flow.value = flow.value.map {
+                if (it.harvest.id == harvestId) it.copy(isPendingWrite = false) else it
+            }
+        }
     }
 }

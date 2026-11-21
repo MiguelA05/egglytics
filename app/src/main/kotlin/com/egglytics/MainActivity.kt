@@ -27,6 +27,11 @@ class MainActivity : ComponentActivity() {
                     onPasswordChange = viewModel::onPasswordChange,
                     onSignIn = viewModel::signIn,
                     onSignOut = viewModel::signOut,
+                    onHarvestQtyChange = viewModel::onHarvestQtyChange,
+                    onDiscardedChange = viewModel::onDiscardedChange,
+                    onHarvestDateChange = viewModel::onHarvestDateChange,
+                    onHarvestNoteChange = viewModel::onHarvestNoteChange,
+                    onSubmitHarvest = { viewModel.submitHarvest() },
                 )
             }
         }
