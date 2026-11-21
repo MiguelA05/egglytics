@@ -3,16 +3,21 @@ package com.egglytics.ui
 import com.egglytics.data.model.Business
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedSale
 import com.egglytics.data.repository.PriceRepository
 import com.egglytics.data.repository.RejectionReason
+import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
 import com.egglytics.data.repository.SessionState
+import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Member
 import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.Price
+import com.egglytics.domain.model.Sale
+import com.egglytics.domain.model.SingleLineSaleRequest
 import com.egglytics.domain.usecase.ActivePriceResult
 import com.egglytics.domain.usecase.GetActivePriceUseCase
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +65,15 @@ class MainViewModelTest {
         createdAt = Instant.parse("2026-11-01T12:00:00Z"),
     )
 
+    private val activeAaPrice = Price(
+        id = "p_aa_new",
+        classification = EggClassification.AA,
+        pricePerBucket = 18500L,
+        validFrom = LocalDate.of(2026, 11, 18),
+        createdAt = Instant.parse("2026-11-18T10:00:00Z"),
+        createdBy = "admin_1",
+    )
+
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
@@ -91,14 +105,7 @@ class MainViewModelTest {
                     createdAt = Instant.parse("2026-11-01T10:00:00Z"),
                     createdBy = "admin_1",
                 ),
-                Price(
-                    id = "p_aa_new",
-                    classification = EggClassification.AA,
-                    pricePerBucket = 18500L,
-                    validFrom = LocalDate.of(2026, 11, 18),
-                    createdAt = Instant.parse("2026-11-18T10:00:00Z"),
-                    createdBy = "admin_1",
-                ),
+                activeAaPrice,
                 Price(
                     id = "p_a_future",
                     classification = EggClassification.A,
@@ -109,9 +116,14 @@ class MainViewModelTest {
                 ),
             ),
         )
-        val harvestRepo = FakeHarvestRepository()
-
-        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(
+            sessionRepo,
+            priceRepo,
+            FakeHarvestRepository(),
+            FakeSaleRepository(),
+            GetActivePriceUseCase(),
+            fixedClock,
+        )
         advanceUntilIdle()
 
         vm.onEmailChange("operador@example.com")
@@ -121,19 +133,7 @@ class MainViewModelTest {
 
         val state = vm.uiState.value
         assertTrue(state.sessionState is SessionState.Authenticated)
-        assertEquals(
-            ActivePriceResult.Found(
-                Price(
-                    id = "p_aa_new",
-                    classification = EggClassification.AA,
-                    pricePerBucket = 18500L,
-                    validFrom = LocalDate.of(2026, 11, 18),
-                    createdAt = Instant.parse("2026-11-18T10:00:00Z"),
-                    createdBy = "admin_1",
-                ),
-            ),
-            state.activePrices[EggClassification.AA],
-        )
+        assertEquals(ActivePriceResult.Found(activeAaPrice), state.activePrices[EggClassification.AA])
         assertEquals(ActivePriceResult.NotFound, state.activePrices[EggClassification.A])
         assertEquals(ActivePriceResult.NotFound, state.activePrices[EggClassification.B])
     }
@@ -145,10 +145,14 @@ class MainViewModelTest {
                 SessionState.Rejected(RejectionReason.NO_MEMBERSHIP, "Sin membresía")
             },
         )
-        val priceRepo = FakePriceRepository(emptyList())
-        val harvestRepo = FakeHarvestRepository()
-
-        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(
+            sessionRepo,
+            FakePriceRepository(emptyList()),
+            FakeHarvestRepository(),
+            FakeSaleRepository(),
+            GetActivePriceUseCase(),
+            fixedClock,
+        )
         advanceUntilIdle()
 
         vm.onEmailChange("stranger@example.com")
@@ -167,18 +171,22 @@ class MainViewModelTest {
         val sessionRepo = FakeSessionRepository(
             initial = SessionState.Authenticated("operator_1", "operador@example.com", operatorMember, business),
         )
-        val priceRepo = FakePriceRepository(emptyList())
         val harvestRepo = FakeHarvestRepository()
 
-        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(
+            sessionRepo,
+            FakePriceRepository(emptyList()),
+            harvestRepo,
+            FakeSaleRepository(),
+            GetActivePriceUseCase(),
+            fixedClock,
+        )
         advanceUntilIdle()
 
-        // Empty harvest rejected
         vm.submitHarvest("h_empty")
         assertNotNull(vm.uiState.value.harvestError)
         assertTrue(harvestRepo.recordedIds.isEmpty())
 
-        // Valid harvest enqueued as pending, then confirmed
         vm.onHarvestQtyChange(EggClassification.AA, "90")
         vm.onHarvestQtyChange(EggClassification.A, "30")
         vm.onDiscardedChange("4")
@@ -197,14 +205,64 @@ class MainViewModelTest {
     }
 
     @Test
+    fun `submitSale creates pending sale with active price and markSaleDelivered updates status`() = runTest {
+        val sessionRepo = FakeSessionRepository(
+            initial = SessionState.Authenticated("operator_1", "operador@example.com", operatorMember, business),
+        )
+        val saleRepo = FakeSaleRepository()
+
+        val vm = MainViewModel(
+            sessionRepo,
+            FakePriceRepository(listOf(activeAaPrice)),
+            FakeHarvestRepository(),
+            saleRepo,
+            GetActivePriceUseCase(),
+            fixedClock,
+        )
+        advanceUntilIdle()
+
+        // Sin precio vigente para B -> rechazada
+        vm.onSaleClassificationChange(EggClassification.B)
+        vm.onSaleBucketsChange("2")
+        vm.submitSale("sale_no_price")
+        assertNotNull(vm.uiState.value.saleError)
+        assertTrue(saleRepo.createdIds.isEmpty())
+
+        // Con AA (18500) y 2 cubetas -> 37000 pending, luego entregada
+        vm.onSaleClassificationChange(EggClassification.AA)
+        vm.onSaleBucketsChange("2")
+        vm.onSaleNoteChange("Tienda esquina")
+        vm.submitSale("sale_aa_1")
+        advanceUntilIdle()
+
+        assertNull(vm.uiState.value.saleError)
+        assertEquals(listOf("sale_aa_1"), saleRepo.createdIds)
+        val created = vm.uiState.value.sales.first().sale
+        assertEquals(DeliveryStatus.PENDING, created.deliveryStatus)
+        assertEquals(37000L, created.total)
+        assertEquals(60L, created.lines.first().eggs)
+
+        vm.markSaleDelivered("sale_aa_1")
+        advanceUntilIdle()
+        val delivered = vm.uiState.value.sales.first().sale
+        assertEquals(DeliveryStatus.DELIVERED, delivered.deliveryStatus)
+        assertEquals(37000L, delivered.total)
+        assertEquals(created.lines, delivered.lines)
+    }
+
+    @Test
     fun `signOut resets session to Unauthenticated`() = runTest {
         val sessionRepo = FakeSessionRepository(
             initial = SessionState.Authenticated("operator_1", "operador@example.com", operatorMember, business),
         )
-        val priceRepo = FakePriceRepository(emptyList())
-        val harvestRepo = FakeHarvestRepository()
-
-        val vm = MainViewModel(sessionRepo, priceRepo, harvestRepo, GetActivePriceUseCase(), fixedClock)
+        val vm = MainViewModel(
+            sessionRepo,
+            FakePriceRepository(emptyList()),
+            FakeHarvestRepository(),
+            FakeSaleRepository(),
+            GetActivePriceUseCase(),
+            fixedClock,
+        )
         advanceUntilIdle()
         assertTrue(vm.uiState.value.sessionState is SessionState.Authenticated)
 
@@ -270,6 +328,57 @@ class MainViewModelTest {
         fun markConfirmed(harvestId: String) {
             flow.value = flow.value.map {
                 if (it.harvest.id == harvestId) it.copy(isPendingWrite = false) else it
+            }
+        }
+    }
+
+    private class FakeSaleRepository : SaleRepository {
+        private val flow = MutableStateFlow<List<ObservedSale>>(emptyList())
+        val createdIds = mutableListOf<String>()
+
+        override fun observeSales(): Flow<List<ObservedSale>> = flow
+
+        override fun createPendingSale(
+            saleId: String,
+            fechaOperativa: LocalDate,
+            businessStartDate: LocalDate,
+            classification: EggClassification,
+            buckets: Long,
+            activePrice: Price,
+            note: String?,
+            onWriteError: (String) -> Unit,
+        ) {
+            createdIds.add(saleId)
+            val sale = Sale.createSingleLinePending(
+                SingleLineSaleRequest(
+                    id = saleId,
+                    fechaOperativa = fechaOperativa,
+                    businessStartDate = businessStartDate,
+                    createdAt = Instant.parse("2026-11-21T15:00:00Z"),
+                    createdBy = "operator_1",
+                    classification = classification,
+                    buckets = buckets,
+                    activePrice = activePrice,
+                    note = note,
+                ),
+            )
+            flow.value = listOf(ObservedSale(sale = sale, isPendingWrite = false)) + flow.value
+        }
+
+        override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) {
+            flow.value = flow.value.map { observed ->
+                if (observed.sale.id == saleId) {
+                    val s = observed.sale
+                    observed.copy(
+                        sale = s.copy(
+                            deliveryStatus = DeliveryStatus.DELIVERED,
+                            deliveredAt = Instant.parse("2026-11-21T16:00:00Z"),
+                            deliveredBy = "operator_1",
+                        ),
+                    )
+                } else {
+                    observed
+                }
             }
         }
     }

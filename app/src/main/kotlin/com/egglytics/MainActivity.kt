@@ -32,6 +32,12 @@ class MainActivity : ComponentActivity() {
                     onHarvestDateChange = viewModel::onHarvestDateChange,
                     onHarvestNoteChange = viewModel::onHarvestNoteChange,
                     onSubmitHarvest = { viewModel.submitHarvest() },
+                    onSaleClassificationChange = viewModel::onSaleClassificationChange,
+                    onSaleBucketsChange = viewModel::onSaleBucketsChange,
+                    onSaleDateChange = viewModel::onSaleDateChange,
+                    onSaleNoteChange = viewModel::onSaleNoteChange,
+                    onSubmitSale = { viewModel.submitSale() },
+                    onMarkSaleDelivered = viewModel::markSaleDelivered,
                 )
             }
         }

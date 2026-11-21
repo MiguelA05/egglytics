@@ -4,12 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedSale
 import com.egglytics.data.repository.PriceRepository
+import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.Sale
+import com.egglytics.domain.model.SingleLineSaleRequest
 import com.egglytics.domain.usecase.ActivePriceResult
 import com.egglytics.domain.usecase.GetActivePriceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,6 +44,13 @@ data class MainUiState(
     val harvestError: String? = null,
     val harvests: List<ObservedHarvest> = emptyList(),
     val harvestsError: String? = null,
+    val saleClassification: EggClassification = EggClassification.AA,
+    val saleBucketsInput: String = "",
+    val saleDateInput: String = "",
+    val saleNoteInput: String = "",
+    val saleError: String? = null,
+    val sales: List<ObservedSale> = emptyList(),
+    val salesError: String? = null,
 )
 
 @HiltViewModel
@@ -47,6 +58,7 @@ class MainViewModel @Inject constructor(
     private val sessionRepository: SessionRepository,
     private val priceRepository: PriceRepository,
     private val harvestRepository: HarvestRepository,
+    private val saleRepository: SaleRepository,
     private val getActivePriceUseCase: GetActivePriceUseCase,
     private val clock: Clock,
 ) : ViewModel() {
@@ -58,6 +70,7 @@ class MainViewModel @Inject constructor(
 
     private var pricesJob: Job? = null
     private var harvestsJob: Job? = null
+    private var salesJob: Job? = null
 
     init {
         restoreSession()
@@ -90,6 +103,100 @@ class MainViewModel @Inject constructor(
 
     fun onHarvestNoteChange(value: String) {
         _uiState.update { it.copy(harvestNoteInput = value) }
+    }
+
+    fun onSaleClassificationChange(classification: EggClassification) {
+        _uiState.update { it.copy(saleClassification = classification, saleError = null) }
+    }
+
+    fun onSaleBucketsChange(value: String) {
+        _uiState.update { it.copy(saleBucketsInput = value, saleError = null) }
+    }
+
+    fun onSaleDateChange(value: String) {
+        _uiState.update { it.copy(saleDateInput = value, saleError = null) }
+    }
+
+    fun onSaleNoteChange(value: String) {
+        _uiState.update { it.copy(saleNoteInput = value) }
+    }
+
+    fun submitSale(saleId: String = UUID.randomUUID().toString()) {
+        val state = _uiState.value
+        val session = state.sessionState as? SessionState.Authenticated ?: return
+
+        val parsedDate = runCatching {
+            OperationalDate.parse(state.saleDateInput.trim())
+        }.getOrElse { ex ->
+            _uiState.update { it.copy(saleError = ex.message ?: "Fecha operativa inválida.") }
+            return
+        }
+
+        val bucketsRaw = state.saleBucketsInput.trim()
+        val buckets = bucketsRaw.toLongOrNull()
+        if (buckets == null || buckets <= 0L) {
+            _uiState.update { it.copy(saleError = "Ingresa una cantidad válida de cubetas (> 0).") }
+            return
+        }
+
+        val activePriceResult = state.activePrices[state.saleClassification]
+        if (activePriceResult !is ActivePriceResult.Found) {
+            _uiState.update {
+                it.copy(saleError = "No hay precio vigente para ${state.saleClassification.name}.")
+            }
+            return
+        }
+
+        val validationError = runCatching {
+            Sale.createSingleLinePending(
+                SingleLineSaleRequest(
+                    id = saleId,
+                    fechaOperativa = parsedDate,
+                    businessStartDate = session.business.startDate,
+                    createdAt = clock.instant(),
+                    createdBy = session.uid,
+                    classification = state.saleClassification,
+                    buckets = buckets,
+                    activePrice = activePriceResult.price,
+                    note = state.saleNoteInput,
+                ),
+            )
+        }.exceptionOrNull()
+
+        if (validationError != null) {
+            _uiState.update { it.copy(saleError = validationError.message ?: "Venta inválida.") }
+            return
+        }
+
+        saleRepository.createPendingSale(
+            saleId = saleId,
+            fechaOperativa = parsedDate,
+            businessStartDate = session.business.startDate,
+            classification = state.saleClassification,
+            buckets = buckets,
+            activePrice = activePriceResult.price,
+            note = state.saleNoteInput,
+            onWriteError = { err ->
+                _uiState.update { it.copy(saleError = err) }
+            },
+        )
+
+        _uiState.update { current ->
+            current.copy(
+                saleBucketsInput = "",
+                saleNoteInput = "",
+                saleError = null,
+            )
+        }
+    }
+
+    fun markSaleDelivered(saleId: String) {
+        saleRepository.markDelivered(
+            saleId = saleId,
+            onWriteError = { err ->
+                _uiState.update { it.copy(salesError = err) }
+            },
+        )
     }
 
     fun submitHarvest(harvestId: String = UUID.randomUUID().toString()) {
@@ -166,7 +273,9 @@ class MainViewModel @Inject constructor(
         if (email.isEmpty() || password.isEmpty()) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, pricesError = null, harvestsError = null) }
+            _uiState.update {
+                it.copy(isLoading = true, pricesError = null, harvestsError = null, salesError = null)
+            }
             val result = sessionRepository.signIn(email, password)
             _uiState.update { it.copy(isLoading = false, sessionState = result) }
             if (result is SessionState.Authenticated) {
@@ -199,6 +308,7 @@ class MainViewModel @Inject constructor(
     private fun startObservingData() {
         startObservingPrices()
         startObservingHarvests()
+        startObservingSales()
     }
 
     private fun startObservingPrices() {
@@ -246,15 +356,41 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    private fun startObservingSales() {
+        salesJob?.cancel()
+        salesJob = viewModelScope.launch {
+            saleRepository.observeSales()
+                .catch { ex ->
+                    _uiState.update {
+                        it.copy(salesError = ex.localizedMessage ?: "Error al consultar ventas.")
+                    }
+                }
+                .collect { items ->
+                    _uiState.update {
+                        it.copy(
+                            sales = items,
+                            salesError = null,
+                        )
+                    }
+                }
+        }
+    }
+
     private fun stopObservingData() {
         pricesJob?.cancel()
         pricesJob = null
         harvestsJob?.cancel()
         harvestsJob = null
+        salesJob?.cancel()
+        salesJob = null
     }
 
-    private fun initialState(today: LocalDate): MainUiState = MainUiState(
-        operationalDate = today,
-        harvestDateInput = OperationalDate.format(today),
-    )
+    private fun initialState(today: LocalDate): MainUiState {
+        val formatted = OperationalDate.format(today)
+        return MainUiState(
+            operationalDate = today,
+            harvestDateInput = formatted,
+            saleDateInput = formatted,
+        )
+    }
 }

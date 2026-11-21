@@ -4,9 +4,11 @@ import android.content.Context
 import com.egglytics.BuildConfig
 import com.egglytics.data.repository.FirebaseHarvestRepository
 import com.egglytics.data.repository.FirebasePriceRepository
+import com.egglytics.data.repository.FirebaseSaleRepository
 import com.egglytics.data.repository.FirebaseSessionRepository
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.PriceRepository
+import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.GetActivePriceUseCase
@@ -101,4 +103,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindHarvestRepository(impl: FirebaseHarvestRepository): HarvestRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSaleRepository(impl: FirebaseSaleRepository): SaleRepository
 }

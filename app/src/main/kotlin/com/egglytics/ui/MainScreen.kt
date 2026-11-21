@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -25,7 +26,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedSale
 import com.egglytics.data.repository.SessionState
+import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.ActivePriceResult
@@ -42,6 +45,12 @@ fun MainScreen(
     onHarvestDateChange: (String) -> Unit,
     onHarvestNoteChange: (String) -> Unit,
     onSubmitHarvest: () -> Unit,
+    onSaleClassificationChange: (EggClassification) -> Unit,
+    onSaleBucketsChange: (String) -> Unit,
+    onSaleDateChange: (String) -> Unit,
+    onSaleNoteChange: (String) -> Unit,
+    onSubmitSale: () -> Unit,
+    onMarkSaleDelivered: (String) -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -75,6 +84,12 @@ fun MainScreen(
                         onHarvestDateChange = onHarvestDateChange,
                         onHarvestNoteChange = onHarvestNoteChange,
                         onSubmitHarvest = onSubmitHarvest,
+                        onSaleClassificationChange = onSaleClassificationChange,
+                        onSaleBucketsChange = onSaleBucketsChange,
+                        onSaleDateChange = onSaleDateChange,
+                        onSaleNoteChange = onSaleNoteChange,
+                        onSubmitSale = onSubmitSale,
+                        onMarkSaleDelivered = onMarkSaleDelivered,
                     )
                 }
             }
@@ -152,6 +167,12 @@ private fun BusinessAndPricesContent(
     onHarvestDateChange: (String) -> Unit,
     onHarvestNoteChange: (String) -> Unit,
     onSubmitHarvest: () -> Unit,
+    onSaleClassificationChange: (EggClassification) -> Unit,
+    onSaleBucketsChange: (String) -> Unit,
+    onSaleDateChange: (String) -> Unit,
+    onSaleNoteChange: (String) -> Unit,
+    onSubmitSale: () -> Unit,
+    onMarkSaleDelivered: (String) -> Unit,
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -178,6 +199,58 @@ private fun BusinessAndPricesContent(
                 OutlinedButton(onClick = onSignOut) {
                     Text("Salir")
                 }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Registrar venta",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+
+        item {
+            SaleFormCard(
+                currency = session.business.currency,
+                state = state,
+                onSaleClassificationChange = onSaleClassificationChange,
+                onSaleBucketsChange = onSaleBucketsChange,
+                onSaleDateChange = onSaleDateChange,
+                onSaleNoteChange = onSaleNoteChange,
+                onSubmitSale = onSubmitSale,
+            )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Ventas (${state.sales.size})",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (state.salesError != null) {
+                Text(
+                    text = state.salesError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        if (state.sales.isEmpty()) {
+            item {
+                Text(
+                    text = "Sin ventas registradas.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        } else {
+            items(state.sales, key = { it.sale.id }) { item ->
+                SaleRowCard(
+                    observed = item,
+                    currency = session.business.currency,
+                    onMarkDelivered = { onMarkSaleDelivered(item.sale.id) },
+                )
             }
         }
 
@@ -264,6 +337,149 @@ private fun BusinessAndPricesContent(
                         text = label,
                         style = MaterialTheme.typography.bodyLarge,
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaleFormCard(
+    currency: String,
+    state: MainUiState,
+    onSaleClassificationChange: (EggClassification) -> Unit,
+    onSaleBucketsChange: (String) -> Unit,
+    onSaleDateChange: (String) -> Unit,
+    onSaleNoteChange: (String) -> Unit,
+    onSubmitSale: () -> Unit,
+) {
+    val activePrice = state.activePrices[state.saleClassification] as? ActivePriceResult.Found
+    val parsedBuckets = state.saleBucketsInput.trim().toLongOrNull()?.takeIf { it > 0L }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                EggClassification.entries.forEach { classification ->
+                    FilterChip(
+                        selected = state.saleClassification == classification,
+                        onClick = { onSaleClassificationChange(classification) },
+                        label = { Text(classification.name) },
+                    )
+                }
+            }
+            val priceLabel = if (activePrice != null) {
+                "Precio vigente ${state.saleClassification.name}: ${activePrice.price.pricePerBucket} $currency / cubeta"
+            } else {
+                "Sin precio vigente para ${state.saleClassification.name}"
+            }
+            Text(
+                text = priceLabel,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = state.saleDateInput,
+                onValueChange = onSaleDateChange,
+                label = { Text("Fecha venta (YYYY-MM-DD)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.saleBucketsInput,
+                onValueChange = onSaleBucketsChange,
+                label = { Text("Cubetas") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = state.saleNoteInput,
+                onValueChange = onSaleNoteChange,
+                label = { Text("Nota venta (opcional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (activePrice != null && parsedBuckets != null) {
+                val totalPreview = parsedBuckets * activePrice.price.pricePerBucket
+                Text(
+                    text = "Total estimado: $totalPreview $currency (${parsedBuckets * 30L} huevos)",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            if (state.saleError != null) {
+                Text(
+                    text = state.saleError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Button(
+                onClick = onSubmitSale,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Guardar venta")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaleRowCard(
+    observed: ObservedSale,
+    currency: String,
+    onMarkDelivered: () -> Unit,
+) {
+    val sale = observed.sale
+    val line = sale.lines.first()
+    val deliveryText = when (sale.deliveryStatus) {
+        DeliveryStatus.PENDING -> "Pendiente entrega"
+        DeliveryStatus.DELIVERED -> "Entregada"
+    }
+    val syncText = if (observed.isPendingWrite) "Pendiente" else "Confirmado"
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "${OperationalDate.format(sale.fechaOperativa)} · $deliveryText",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = syncText,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            Text(
+                text = "${line.classification.name}: ${line.buckets} cubetas (${line.eggs} huevos) · Total: ${sale.total} $currency",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (!sale.note.isNullOrBlank()) {
+                Text(
+                    text = sale.note.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (sale.deliveryStatus == DeliveryStatus.PENDING) {
+                OutlinedButton(
+                    onClick = onMarkDelivered,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Marcar entregada")
                 }
             }
         }
