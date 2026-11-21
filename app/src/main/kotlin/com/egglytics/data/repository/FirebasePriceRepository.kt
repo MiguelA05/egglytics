@@ -1,0 +1,69 @@
+package com.egglytics.data.repository
+
+import com.egglytics.BuildConfig
+import com.egglytics.domain.model.EggClassification
+import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.Price
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.MetadataChanges
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.tasks.await
+import java.time.Instant
+import javax.inject.Inject
+
+class FirebasePriceRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+) : PriceRepository {
+
+    override fun observePrices(): Flow<List<Price>> = callbackFlow {
+        val registration = firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("prices")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    trySend(snapshot.documents.mapNotNull { it.toPriceOrNull() })
+                }
+            }
+        awaitClose { registration.remove() }
+    }
+
+    override suspend fun getPrices(): List<Price> {
+        val snapshot = firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("prices")
+            .get()
+            .await()
+        return snapshot.documents.mapNotNull { it.toPriceOrNull() }
+    }
+}
+
+private fun DocumentSnapshot.toPriceOrNull(): Price? {
+    if (!exists()) return null
+    val classificationRaw = getString("classification") ?: return null
+    val classification = EggClassification.entries.firstOrNull { it.name == classificationRaw } ?: return null
+    val pricePerBucket = getLong("pricePerBucket") ?: return null
+    if (pricePerBucket <= 0L) return null
+    val validFromRaw = getString("validFrom") ?: return null
+    val validFrom = runCatching { OperationalDate.parse(validFromRaw) }.getOrNull() ?: return null
+    val createdAt = getTimestamp("createdAt")?.toDate()?.toInstant() ?: Instant.EPOCH
+    val createdBy = getString("createdBy").orEmpty()
+
+    return Price(
+        id = id,
+        classification = classification,
+        pricePerBucket = pricePerBucket,
+        validFrom = validFrom,
+        createdAt = createdAt,
+        createdBy = createdBy,
+        note = getString("note"),
+    )
+}

@@ -3,20 +3,31 @@ package com.egglytics
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.egglytics.ui.MainScreen
+import com.egglytics.ui.MainViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    private val viewModel: MainViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface {
-                    Text(text = "Egglytics (${BuildConfig.BUSINESS_ID})")
-                }
+                val state by viewModel.uiState.collectAsStateWithLifecycle()
+                MainScreen(
+                    state = state,
+                    onEmailChange = viewModel::onEmailChange,
+                    onPasswordChange = viewModel::onPasswordChange,
+                    onSignIn = viewModel::signIn,
+                    onSignOut = viewModel::signOut,
+                )
             }
         }
     }
