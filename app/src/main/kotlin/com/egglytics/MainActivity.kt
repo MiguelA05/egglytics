@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
                                     state = saleUi,
                                     onBack = sessionViewModel::navigateHome,
                                     onSaleClassificationChange = saleViewModel::onSaleClassificationChange,
+                                    onPaymentMethodSelect = saleViewModel::onPaymentMethodSelect,
                                     onSaleBucketsChange = saleViewModel::onSaleBucketsChange,
                                     onSaleDateChange = saleViewModel::onSaleDateChange,
                                     onSaleNoteChange = saleViewModel::onSaleNoteChange,

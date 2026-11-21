@@ -37,6 +37,7 @@ fun SaleScreen(
     state: SaleUiState,
     onBack: () -> Unit,
     onSaleClassificationChange: (EggClassification) -> Unit,
+    onPaymentMethodSelect: (String) -> Unit,
     onSaleBucketsChange: (String) -> Unit,
     onSaleDateChange: (String) -> Unit,
     onSaleNoteChange: (String) -> Unit,
@@ -98,11 +99,36 @@ fun SaleScreen(
                             text = priceLabel,
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        Text(
+                            text = "Forma de pago",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        if (state.paymentMethods.isEmpty()) {
+                            Text(
+                                text = "No hay formas de pago activas.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                state.paymentMethods.forEach { method ->
+                                    FilterChip(
+                                        selected = state.form.selectedMethodId == method.id,
+                                        onClick = { onPaymentMethodSelect(method.id) },
+                                        label = { Text(method.name) },
+                                    )
+                                }
+                            }
+                        }
                         OutlinedTextField(
                             value = state.form.saleDateInput,
                             onValueChange = onSaleDateChange,
                             label = { Text("Fecha venta (YYYY-MM-DD)") },
                             singleLine = true,
+                            enabled = !state.form.isSubmitting,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         OutlinedTextField(
@@ -110,6 +136,7 @@ fun SaleScreen(
                             onValueChange = onSaleBucketsChange,
                             label = { Text("Cubetas") },
                             singleLine = true,
+                            enabled = !state.form.isSubmitting,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -118,12 +145,13 @@ fun SaleScreen(
                             onValueChange = onSaleNoteChange,
                             label = { Text("Nota venta (opcional)") },
                             singleLine = true,
+                            enabled = !state.form.isSubmitting,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         if (activePrice != null && parsedBuckets != null) {
                             val totalPreview = parsedBuckets * activePrice.price.pricePerBucket
                             Text(
-                                text = "Total estimado: $totalPreview $currency (${parsedBuckets * 30L} huevos)",
+                                text = "Total a cobrar: $totalPreview $currency (${parsedBuckets * 30L} huevos)",
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -136,9 +164,10 @@ fun SaleScreen(
                         }
                         Button(
                             onClick = onSubmitSale,
+                            enabled = !state.form.isSubmitting && state.paymentMethods.isNotEmpty(),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Text("Guardar venta")
+                            Text(if (state.form.isSubmitting) "Guardando..." else "Guardar venta")
                         }
                     }
                 }
@@ -170,6 +199,7 @@ fun SaleScreen(
                 items(state.sales, key = { it.sale.id }) { item ->
                     SaleRowCard(
                         observed = item,
+                        paidAmount = state.paidAmountBySaleId[item.sale.id] ?: 0L,
                         currency = currency,
                         onMarkDelivered = { onMarkSaleDelivered(item.sale.id) },
                     )
@@ -182,6 +212,7 @@ fun SaleScreen(
 @Composable
 private fun SaleRowCard(
     observed: ObservedSale,
+    paidAmount: Long,
     currency: String,
     onMarkDelivered: () -> Unit,
 ) {
@@ -190,6 +221,11 @@ private fun SaleRowCard(
     val deliveryText = when (sale.deliveryStatus) {
         DeliveryStatus.PENDING -> "Pendiente entrega"
         DeliveryStatus.DELIVERED -> "Entregada"
+    }
+    val paymentText = if (paidAmount > 0L) {
+        "Pagado: $paidAmount $currency"
+    } else {
+        "Sin pago registrado"
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -212,6 +248,10 @@ private fun SaleRowCard(
             Text(
                 text = "${line.classification.name}: ${line.buckets} cubetas (${line.eggs} huevos) · Total: ${sale.total} $currency",
                 style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = paymentText,
+                style = MaterialTheme.typography.bodySmall,
             )
             if (!sale.note.isNullOrBlank()) {
                 Text(

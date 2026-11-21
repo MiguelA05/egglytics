@@ -3,10 +3,14 @@ package com.egglytics.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.egglytics.data.repository.ObservedSale
+import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.SaleRepository
+import com.egglytics.data.repository.SaleWithPaymentRequest
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.Payment
+import com.egglytics.domain.model.PaymentMethod
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SingleLineSaleRequest
 import com.egglytics.domain.usecase.ActivePriceResult
@@ -29,15 +33,19 @@ import javax.inject.Inject
 
 data class SaleFormState(
     val saleClassification: EggClassification = EggClassification.AA,
+    val selectedMethodId: String? = null,
     val saleBucketsInput: String = "",
     val saleDateInput: String = "",
     val saleNoteInput: String = "",
+    val isSubmitting: Boolean = false,
     val saleError: String? = null,
 )
 
 data class SaleUiState(
     val form: SaleFormState = SaleFormState(),
+    val paymentMethods: List<PaymentMethod> = emptyList(),
     val sales: List<ObservedSale> = emptyList(),
+    val paidAmountBySaleId: Map<String, Long> = emptyMap(),
     val salesError: String? = null,
 )
 
@@ -45,6 +53,7 @@ data class SaleUiState(
 @HiltViewModel
 class SaleViewModel @Inject constructor(
     private val saleRepository: SaleRepository,
+    private val paymentMethodRepository: PaymentMethodRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -65,15 +74,48 @@ class SaleViewModel @Inject constructor(
             }
         }
 
+    private val observedPaymentMethods = activeUid
+        .flatMapLatest { uid ->
+            if (uid == null) {
+                flowOf(Pair(emptyList<PaymentMethod>(), null as String?))
+            } else {
+                paymentMethodRepository.observeActivePaymentMethods()
+                    .map { items -> Pair(items, null as String?) }
+                    .catch { ex ->
+                        emit(Pair(emptyList(), ex.localizedMessage ?: "Error al consultar formas de pago."))
+                    }
+            }
+        }
+
+    private val observedPayments = activeUid
+        .flatMapLatest { uid ->
+            if (uid == null) {
+                flowOf(emptyMap<String, List<Payment>>())
+            } else {
+                saleRepository.observeSalePayments()
+                    .catch { emit(emptyMap()) }
+            }
+        }
+
     val uiState: StateFlow<SaleUiState> = combine(
         formState,
         observedSales,
+        observedPaymentMethods,
+        observedPayments,
         deliveryError,
-    ) { form, (items, obsErr), delivErr ->
+    ) { form, salesRes, methodsRes, paymentsBySale, delivErr ->
+        val methods = methodsRes.first
+        val effectiveMethodId = when {
+            form.selectedMethodId != null && methods.any { it.id == form.selectedMethodId } -> form.selectedMethodId
+            else -> methods.firstOrNull()?.id
+        }
+        val paidAmounts = paymentsBySale.mapValues { (_, list) -> list.sumOf { it.amount } }
         SaleUiState(
-            form = form,
-            sales = items,
-            salesError = delivErr ?: obsErr,
+            form = form.copy(selectedMethodId = effectiveMethodId),
+            paymentMethods = methods,
+            sales = salesRes.first,
+            paidAmountBySaleId = paidAmounts,
+            salesError = delivErr ?: salesRes.second ?: methodsRes.second,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -96,6 +138,10 @@ class SaleViewModel @Inject constructor(
         formState.update { it.copy(saleClassification = classification, saleError = null) }
     }
 
+    fun onPaymentMethodSelect(methodId: String) {
+        formState.update { it.copy(selectedMethodId = methodId, saleError = null) }
+    }
+
     fun onSaleBucketsChange(value: String) {
         formState.update { it.copy(saleBucketsInput = value, saleError = null) }
     }
@@ -112,8 +158,12 @@ class SaleViewModel @Inject constructor(
         session: SessionState.Authenticated,
         activePrices: Map<EggClassification, ActivePriceResult>,
         saleId: String = UUID.randomUUID().toString(),
+        paymentId: String = UUID.randomUUID().toString(),
     ) {
         val state = formState.value
+        val currentUi = uiState.value
+        if (state.isSubmitting) return
+
         val parsedDate = runCatching {
             OperationalDate.parse(state.saleDateInput.trim())
         }.getOrElse { ex ->
@@ -136,8 +186,14 @@ class SaleViewModel @Inject constructor(
             return
         }
 
+        val methodId = state.selectedMethodId ?: currentUi.paymentMethods.firstOrNull()?.id
+        if (methodId.isNullOrBlank() || currentUi.paymentMethods.none { it.id == methodId }) {
+            formState.update { it.copy(saleError = "Selecciona una forma de pago activa.") }
+            return
+        }
+
         val validationError = runCatching {
-            Sale.createSingleLinePending(
+            val previewSale = Sale.createSingleLinePending(
                 SingleLineSaleRequest(
                     id = saleId,
                     fechaOperativa = parsedDate,
@@ -150,6 +206,11 @@ class SaleViewModel @Inject constructor(
                     note = state.saleNoteInput,
                 ),
             )
+            Payment.forFullSalePayment(
+                id = paymentId,
+                sale = previewSale,
+                methodId = methodId,
+            )
         }.exceptionOrNull()
 
         if (validationError != null) {
@@ -157,26 +218,39 @@ class SaleViewModel @Inject constructor(
             return
         }
 
-        saleRepository.createPendingSale(
-            saleId = saleId,
-            fechaOperativa = parsedDate,
-            businessStartDate = session.business.startDate,
-            classification = state.saleClassification,
-            buckets = buckets,
-            activePrice = activePriceResult.price,
-            note = state.saleNoteInput,
+        formState.update { it.copy(isSubmitting = true, saleError = null) }
+
+        saleRepository.createPendingSaleWithFullPayment(
+            request = SaleWithPaymentRequest(
+                saleId = saleId,
+                paymentId = paymentId,
+                fechaOperativa = parsedDate,
+                businessStartDate = session.business.startDate,
+                classification = state.saleClassification,
+                buckets = buckets,
+                activePrice = activePriceResult.price,
+                methodId = methodId,
+                note = state.saleNoteInput,
+            ),
+            onWriteSuccess = {
+                formState.update { current ->
+                    current.copy(
+                        saleBucketsInput = "",
+                        saleNoteInput = "",
+                        isSubmitting = false,
+                        saleError = null,
+                    )
+                }
+            },
             onWriteError = { err ->
-                formState.update { it.copy(saleError = err) }
+                formState.update { current ->
+                    current.copy(
+                        isSubmitting = false,
+                        saleError = err,
+                    )
+                }
             },
         )
-
-        formState.update { current ->
-            current.copy(
-                saleBucketsInput = "",
-                saleNoteInput = "",
-                saleError = null,
-            )
-        }
     }
 
     fun markSaleDelivered(saleId: String) {

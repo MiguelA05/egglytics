@@ -3,10 +3,12 @@ package com.egglytics.di
 import android.content.Context
 import com.egglytics.BuildConfig
 import com.egglytics.data.repository.FirebaseHarvestRepository
+import com.egglytics.data.repository.FirebasePaymentMethodRepository
 import com.egglytics.data.repository.FirebasePriceRepository
 import com.egglytics.data.repository.FirebaseSaleRepository
 import com.egglytics.data.repository.FirebaseSessionRepository
 import com.egglytics.data.repository.HarvestRepository
+import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.PriceRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
@@ -107,4 +109,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindSaleRepository(impl: FirebaseSaleRepository): SaleRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPaymentMethodRepository(impl: FirebasePaymentMethodRepository): PaymentMethodRepository
 }

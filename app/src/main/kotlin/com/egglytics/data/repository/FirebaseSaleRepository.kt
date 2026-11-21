@@ -4,7 +4,8 @@ import com.egglytics.BuildConfig
 import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
-import com.egglytics.domain.model.Price
+import com.egglytics.domain.model.Payment
+import com.egglytics.domain.model.PaymentType
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SaleLine
 import com.egglytics.domain.model.SingleLineSaleRequest
@@ -20,7 +21,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import java.time.Clock
 import java.time.Instant
-import java.time.LocalDate
 import java.util.Date
 import javax.inject.Inject
 
@@ -55,14 +55,29 @@ class FirebaseSaleRepository @Inject constructor(
         awaitClose { registration.remove() }
     }
 
-    override fun createPendingSale(
-        saleId: String,
-        fechaOperativa: LocalDate,
-        businessStartDate: LocalDate,
-        classification: EggClassification,
-        buckets: Long,
-        activePrice: Price,
-        note: String?,
+    override fun observeSalePayments(): Flow<Map<String, List<Payment>>> = callbackFlow {
+        val registration = firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("payments")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val grouped = snapshot.documents
+                        .mapNotNull { it.toSalePaymentOrNull() }
+                        .groupBy { it.saleId.orEmpty() }
+                    trySend(grouped)
+                }
+            }
+        awaitClose { registration.remove() }
+    }
+
+    override fun createPendingSaleWithFullPayment(
+        request: SaleWithPaymentRequest,
+        onWriteSuccess: () -> Unit,
         onWriteError: (String) -> Unit,
     ) {
         val uid = auth.currentUser?.uid
@@ -74,16 +89,21 @@ class FirebaseSaleRepository @Inject constructor(
         val now = Instant.now(clock)
         val sale = Sale.createSingleLinePending(
             SingleLineSaleRequest(
-                id = saleId,
-                fechaOperativa = fechaOperativa,
-                businessStartDate = businessStartDate,
+                id = request.saleId,
+                fechaOperativa = request.fechaOperativa,
+                businessStartDate = request.businessStartDate,
                 createdAt = now,
                 createdBy = uid,
-                classification = classification,
-                buckets = buckets,
-                activePrice = activePrice,
-                note = note,
+                classification = request.classification,
+                buckets = request.buckets,
+                activePrice = request.activePrice,
+                note = request.note,
             ),
+        )
+        val payment = Payment.forFullSalePayment(
+            id = request.paymentId,
+            sale = sale,
+            methodId = request.methodId,
         )
 
         val linesPayload = sale.lines.map { line ->
@@ -97,9 +117,12 @@ class FirebaseSaleRepository @Inject constructor(
             )
         }
 
-        val payload = hashMapOf<String, Any>(
-            "fechaOperativa" to OperationalDate.format(sale.fechaOperativa),
-            "createdAt" to Timestamp(Date.from(sale.createdAt)),
+        val fechaStr = OperationalDate.format(sale.fechaOperativa)
+        val createdAtTs = Timestamp(Date.from(sale.createdAt))
+
+        val salePayload = hashMapOf<String, Any>(
+            "fechaOperativa" to fechaStr,
+            "createdAt" to createdAtTs,
             "syncedAt" to FieldValue.serverTimestamp(),
             "createdBy" to sale.createdBy,
             "lines" to linesPayload,
@@ -107,17 +130,31 @@ class FirebaseSaleRepository @Inject constructor(
             "deliveryStatus" to sale.deliveryStatus.firestoreValue,
         )
         if (!sale.note.isNullOrBlank()) {
-            payload["note"] = sale.note.orEmpty()
+            salePayload["note"] = sale.note.orEmpty()
         }
 
-        firestore
-            .collection("businesses")
-            .document(BuildConfig.BUSINESS_ID)
-            .collection("sales")
-            .document(sale.id)
-            .set(payload)
+        val paymentPayload = hashMapOf<String, Any>(
+            "fechaOperativa" to fechaStr,
+            "createdAt" to createdAtTs,
+            "syncedAt" to FieldValue.serverTimestamp(),
+            "createdBy" to payment.createdBy,
+            "saleId" to sale.id,
+            "amount" to payment.amount,
+            "methodId" to payment.methodId,
+            "type" to payment.type.code,
+        )
+        if (!payment.note.isNullOrBlank()) {
+            paymentPayload["note"] = payment.note.orEmpty()
+        }
+
+        val businessRef = firestore.collection("businesses").document(BuildConfig.BUSINESS_ID)
+        val batch = firestore.batch()
+        batch.set(businessRef.collection("sales").document(sale.id), salePayload)
+        batch.set(businessRef.collection("payments").document(payment.id), paymentPayload)
+        batch.commit()
+            .addOnSuccessListener { onWriteSuccess() }
             .addOnFailureListener { ex ->
-                onWriteError(ex.localizedMessage ?: "No se pudo sincronizar la venta.")
+                onWriteError(ex.localizedMessage ?: "No se pudo guardar la venta con su pago.")
             }
     }
 
@@ -194,6 +231,33 @@ private fun DocumentSnapshot.toSaleOrNull(): Sale? {
             deliveryStatus = deliveryStatus,
             deliveredAt = getTimestamp("deliveredAt")?.toDate()?.toInstant(),
             deliveredBy = getString("deliveredBy"),
+            note = getString("note"),
+        )
+    }.getOrNull()
+}
+
+private fun DocumentSnapshot.toSalePaymentOrNull(): Payment? {
+    if (!exists()) return null
+    val saleId = getString("saleId") ?: return null
+    val typeRaw = getString("type") ?: return null
+    if (typeRaw != PaymentType.PAYMENT.code) return null
+    val fechaRaw = getString("fechaOperativa") ?: return null
+    val fechaOperativa = runCatching { OperationalDate.parse(fechaRaw) }.getOrNull() ?: return null
+    val amount = getLong("amount") ?: return null
+    val methodId = getString("methodId") ?: return null
+    val createdBy = getString("createdBy").orEmpty()
+    val createdAt = getTimestamp("createdAt")?.toDate()?.toInstant() ?: Instant.EPOCH
+
+    return runCatching {
+        Payment(
+            id = id,
+            fechaOperativa = fechaOperativa,
+            createdAt = createdAt,
+            createdBy = createdBy,
+            saleId = saleId,
+            amount = amount,
+            methodId = methodId,
+            type = PaymentType.PAYMENT,
             note = getString("note"),
         )
     }.getOrNull()

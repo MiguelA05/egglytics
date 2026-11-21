@@ -56,6 +56,11 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /paymentMethods/{id} {
+        allow read: if isActive(b);
+        allow write: if false;
+      }
+
       // Los precios no son movimientos: sin fechaOperativa ni restricción de startDate (§8.1).
       match /prices/{id} {
         function validPrice(d) {

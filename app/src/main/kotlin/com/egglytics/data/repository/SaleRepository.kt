@@ -1,6 +1,7 @@
 package com.egglytics.data.repository
 
 import com.egglytics.domain.model.EggClassification
+import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.Price
 import com.egglytics.domain.model.Sale
 import kotlinx.coroutines.flow.Flow
@@ -11,17 +12,26 @@ data class ObservedSale(
     val isPendingWrite: Boolean,
 )
 
+data class SaleWithPaymentRequest(
+    val saleId: String,
+    val paymentId: String,
+    val fechaOperativa: LocalDate,
+    val businessStartDate: LocalDate,
+    val classification: EggClassification,
+    val buckets: Long,
+    val activePrice: Price,
+    val methodId: String,
+    val note: String?,
+)
+
 interface SaleRepository {
     fun observeSales(): Flow<List<ObservedSale>>
 
-    fun createPendingSale(
-        saleId: String,
-        fechaOperativa: LocalDate,
-        businessStartDate: LocalDate,
-        classification: EggClassification,
-        buckets: Long,
-        activePrice: Price,
-        note: String?,
+    fun observeSalePayments(): Flow<Map<String, List<Payment>>>
+
+    fun createPendingSaleWithFullPayment(
+        request: SaleWithPaymentRequest,
+        onWriteSuccess: () -> Unit,
         onWriteError: (String) -> Unit,
     )
 

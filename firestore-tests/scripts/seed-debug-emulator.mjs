@@ -56,6 +56,14 @@ async function main() {
         createdBy: operatorUid,
         note: "Precio inicial de prueba",
       });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/paymentMethods/cash`), {
+        name: "Efectivo",
+        active: true,
+      });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/paymentMethods/nequi`), {
+        name: "Nequi",
+        active: true,
+      });
     });
   } finally {
     await env.cleanup();

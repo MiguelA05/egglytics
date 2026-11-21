@@ -87,6 +87,10 @@ async function seedTestData(
       active: true,
       createdAt: Timestamp.now(),
     });
+    await setDoc(doc(db, `businesses/${BUSINESS_ID}/paymentMethods/cash`), {
+      name: "Efectivo",
+      active: true,
+    });
     await setDoc(doc(db, `businesses/${BUSINESS_ID}/sales/sale_1`), {
       fechaOperativa: "2026-11-18",
       createdAt: Timestamp.now(),
@@ -540,5 +544,46 @@ describe("Task 3a-2: Firestore minimal rules (businesses, members, payments, val
         basePayment({ createdBy: OPERATOR_UID }),
       ),
     );
+  });
+
+  it("12 (AC-32, R-07): active member reads paymentMethods (stranger/unauth/write denied); rejected sale+payment WriteBatch writes neither doc", async () => {
+    const operatorDb = testEnv.authenticatedContext(OPERATOR_UID).firestore();
+    const strangerDb = testEnv.authenticatedContext(STRANGER_UID).firestore();
+    const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+    await assertSucceeds(getDoc(doc(operatorDb, `businesses/${BUSINESS_ID}/paymentMethods/cash`)));
+    await assertFails(getDoc(doc(strangerDb, `businesses/${BUSINESS_ID}/paymentMethods/cash`)));
+    await assertFails(getDoc(doc(unauthDb, `businesses/${BUSINESS_ID}/paymentMethods/cash`)));
+    await assertFails(
+      setDoc(doc(operatorDb, `businesses/${BUSINESS_ID}/paymentMethods/card`), {
+        name: "Tarjeta",
+        active: true,
+      }),
+    );
+
+    const badBatch = writeBatch(operatorDb);
+    badBatch.set(doc(operatorDb, `businesses/${BUSINESS_ID}/sales/s_batch_fail`), {
+      fechaOperativa: "2026-11-18",
+      createdAt: Timestamp.now(),
+      syncedAt: serverTimestamp(),
+      createdBy: OPERATOR_UID,
+      lines: [{ classification: "AA", buckets: 2, eggs: 60, listPrice: 18500, unitPrice: 18500, subtotal: 37000 }],
+      total: 37000,
+      deliveryStatus: "pending",
+    });
+    badBatch.set(
+      doc(operatorDb, `businesses/${BUSINESS_ID}/payments/p_batch_fail`),
+      basePayment({ saleId: "s_batch_fail", amount: 0 }),
+    );
+    await assertFails(badBatch.commit());
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const adminDb = ctx.firestore();
+      const saleSnap = await getDoc(doc(adminDb, `businesses/${BUSINESS_ID}/sales/s_batch_fail`));
+      const paySnap = await getDoc(doc(adminDb, `businesses/${BUSINESS_ID}/payments/p_batch_fail`));
+      if (saleSnap.exists() || paySnap.exists()) {
+        throw new Error("Rejected WriteBatch must not persist sale or payment");
+      }
+    });
   });
 });
