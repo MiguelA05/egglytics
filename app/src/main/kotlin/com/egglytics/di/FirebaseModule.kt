@@ -14,6 +14,7 @@ import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.GetActivePriceUseCase
+import com.egglytics.domain.usecase.GetDailySummaryUseCase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
@@ -88,6 +89,9 @@ object FirebaseModule {
 
     @Provides
     fun provideGetActivePriceUseCase(): GetActivePriceUseCase = GetActivePriceUseCase()
+
+    @Provides
+    fun provideGetDailySummaryUseCase(): GetDailySummaryUseCase = GetDailySummaryUseCase()
 }
 
 @Module

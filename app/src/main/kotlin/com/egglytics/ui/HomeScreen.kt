@@ -28,6 +28,7 @@ import com.egglytics.domain.usecase.ActivePriceResult
 fun HomeScreen(
     session: SessionState.Authenticated,
     state: SessionUiState,
+    homeState: HomeUiState,
     onOpenHarvests: () -> Unit,
     onOpenSales: () -> Unit,
     onSignOut: () -> Unit,
@@ -96,6 +97,61 @@ fun HomeScreen(
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
+                    text = "Resumen de hoy",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        SummaryRow(
+                            label = "Huevos aptos recogidos",
+                            value = "${homeState.summary.gradedEggs}",
+                        )
+                        SummaryRow(
+                            label = "Huevos descartados",
+                            value = "${homeState.summary.discardedEggs}",
+                        )
+                        SummaryRow(
+                            label = "Total vendido",
+                            value = "${homeState.summary.totalSold} ${session.business.currency}",
+                        )
+                        SummaryRow(
+                            label = "Total cobrado",
+                            value = "${homeState.summary.totalCollected} ${session.business.currency}",
+                        )
+                        SummaryRow(
+                            label = "Cubetas por entregar (acumulado)",
+                            value = "${homeState.summary.pendingDeliveryBuckets}",
+                        )
+                        if (homeState.pendingSyncCount > 0) {
+                            Text(
+                                text = "Incluye ${homeState.pendingSyncCount} movimiento(s) pendiente(s) de sincronización",
+                                color = MaterialTheme.colorScheme.tertiary,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        if (homeState.summaryError != null) {
+                            Text(
+                                text = homeState.summaryError,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
                     text = "Precios vigentes",
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -133,5 +189,25 @@ fun HomeScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SummaryRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }

@@ -13,6 +13,7 @@ import com.egglytics.ui.AppDestination
 import com.egglytics.ui.HarvestScreen
 import com.egglytics.ui.HarvestViewModel
 import com.egglytics.ui.HomeScreen
+import com.egglytics.ui.HomeViewModel
 import com.egglytics.ui.LoginScreen
 import com.egglytics.ui.SaleScreen
 import com.egglytics.ui.SaleViewModel
@@ -23,6 +24,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val sessionViewModel: SessionViewModel by viewModels()
+    private val homeViewModel: HomeViewModel by viewModels()
     private val harvestViewModel: HarvestViewModel by viewModels()
     private val saleViewModel: SaleViewModel by viewModels()
 
@@ -34,6 +36,7 @@ class MainActivity : ComponentActivity() {
                 val session = sessionUi.sessionState
 
                 LaunchedEffect(session) {
+                    homeViewModel.syncSession(session)
                     harvestViewModel.syncSession(session)
                     saleViewModel.syncSession(session)
                 }
@@ -56,9 +59,11 @@ class MainActivity : ComponentActivity() {
                     is SessionState.Authenticated -> {
                         when (sessionUi.destination) {
                             AppDestination.HOME -> {
+                                val homeUi by homeViewModel.uiState.collectAsStateWithLifecycle()
                                 HomeScreen(
                                     session = session,
                                     state = sessionUi,
+                                    homeState = homeUi,
                                     onOpenHarvests = { sessionViewModel.navigateTo(AppDestination.HARVESTS) },
                                     onOpenSales = { sessionViewModel.navigateTo(AppDestination.SALES) },
                                     onSignOut = sessionViewModel::signOut,
