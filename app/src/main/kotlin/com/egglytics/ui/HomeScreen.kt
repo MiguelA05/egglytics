@@ -113,23 +113,35 @@ fun HomeScreen(
                     ) {
                         SummaryRow(
                             label = "Huevos aptos recogidos",
-                            value = "${homeState.summary.gradedEggs}",
+                            value = if (homeState.harvestsIncomplete) "Incompleto" else "${homeState.summary.gradedEggs}",
                         )
                         SummaryRow(
                             label = "Huevos descartados",
-                            value = "${homeState.summary.discardedEggs}",
+                            value = if (homeState.harvestsIncomplete) "Incompleto" else "${homeState.summary.discardedEggs}",
                         )
                         SummaryRow(
                             label = "Total vendido",
-                            value = "${homeState.summary.totalSold} ${session.business.currency}",
+                            value = if (homeState.salesIncomplete) {
+                                "Incompleto"
+                            } else {
+                                "${homeState.summary.totalSold} ${session.business.currency}"
+                            },
                         )
                         SummaryRow(
                             label = "Total cobrado",
-                            value = "${homeState.summary.totalCollected} ${session.business.currency}",
+                            value = if (homeState.paymentsIncomplete) {
+                                "Incompleto"
+                            } else {
+                                "${homeState.summary.totalCollected} ${session.business.currency}"
+                            },
                         )
                         SummaryRow(
                             label = "Cubetas por entregar (acumulado)",
-                            value = "${homeState.summary.pendingDeliveryBuckets}",
+                            value = if (homeState.salesIncomplete) {
+                                "Incompleto"
+                            } else {
+                                "${homeState.summary.pendingDeliveryBuckets}"
+                            },
                         )
                         if (homeState.pendingSyncCount > 0) {
                             Text(

@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -150,6 +151,63 @@ class HomeViewModelTest {
         assertEquals(0L, vm.uiState.value.summary.gradedEggs)
         assertEquals(0L, vm.uiState.value.summary.totalSold)
         assertEquals(0, vm.uiState.value.pendingSyncCount)
+
+        job.cancel()
+    }
+
+    @Test
+    fun `when payments stream fails, paymentsIncomplete is true while other summary figures remain valid`() = runTest {
+        val harvestRepo = FakeHarvestRepository(
+            listOf(
+                ObservedHarvest(
+                    harvest = Harvest(
+                        id = "h1",
+                        fechaOperativa = today,
+                        createdAt = now,
+                        createdBy = "op_1",
+                        graded = mapOf(EggClassification.AA to 120L),
+                        discarded = 5L,
+                    ),
+                    isPendingWrite = false,
+                ),
+            ),
+        )
+        val todaySale = Sale(
+            id = "s1",
+            fechaOperativa = today,
+            createdAt = now,
+            createdBy = "op_1",
+            lines = listOf(SaleLine.create(EggClassification.AA, buckets = 2L, listPrice = 18500L)),
+            total = 37000L,
+            deliveryStatus = DeliveryStatus.PENDING,
+        )
+        val failingPaymentsSaleRepo = object : SaleRepository {
+            override fun observeSales(): Flow<List<ObservedSale>> =
+                MutableStateFlow(listOf(ObservedSale(todaySale, isPendingWrite = false)))
+
+            override fun observeSalePayments(): Flow<Map<String, List<Payment>>> =
+                flow { throw IllegalStateException("Fallo en pagos") }
+
+            override fun createPendingSaleWithFullPayment(
+                request: SaleWithPaymentRequest,
+                onWriteError: (String) -> Unit,
+            ) = Unit
+
+            override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) = Unit
+        }
+
+        val vm = HomeViewModel(harvestRepo, failingPaymentsSaleRepo, GetDailySummaryUseCase(), fixedClock)
+        val job = launch { vm.uiState.collect {} }
+        vm.syncSession(authenticated)
+        advanceUntilIdle()
+
+        val state = vm.uiState.value
+        assertEquals(120L, state.summary.gradedEggs)
+        assertEquals(37000L, state.summary.totalSold)
+        assertEquals(false, state.harvestsIncomplete)
+        assertEquals(false, state.salesIncomplete)
+        assertEquals(true, state.paymentsIncomplete)
+        assertEquals("Fallo en pagos", state.summaryError)
 
         job.cancel()
     }

@@ -29,6 +29,9 @@ import javax.inject.Inject
 data class HomeUiState(
     val summary: DailySummary,
     val pendingSyncCount: Int = 0,
+    val harvestsIncomplete: Boolean = false,
+    val salesIncomplete: Boolean = false,
+    val paymentsIncomplete: Boolean = false,
     val summaryError: String? = null,
 )
 
@@ -104,7 +107,11 @@ class HomeViewModel @Inject constructor(
         HomeUiState(
             summary = summary,
             pendingSyncCount = pendingHarvests + pendingSales,
-            summaryError = listOfNotNull(harvestErr, saleErr, paymentErr).firstOrNull(),
+            harvestsIncomplete = harvestErr != null,
+            salesIncomplete = saleErr != null,
+            paymentsIncomplete = paymentErr != null,
+            summaryError = listOfNotNull(harvestErr, saleErr, paymentErr).distinct().joinToString(" · ")
+                .ifEmpty { null },
         )
     }.stateIn(
         scope = viewModelScope,
