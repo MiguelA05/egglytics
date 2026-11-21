@@ -91,8 +91,8 @@ class SaleViewModelTest {
     }
 
     @Test
-    fun `submitSale creates pending sale and full payment atomically, prevents double-tap, and delivers`() = runTest {
-        val repo = FakeSaleRepository(autoComplete = false)
+    fun `local enqueue unlocks form while offline pending, prevents double-tap, and delivers`() = runTest {
+        val repo = FakeSaleRepository(emitLocallyImmediately = false)
         val methodRepo = FakePaymentMethodRepository(listOf(cashMethod, nequiMethod))
         val vm = SaleViewModel(repo, methodRepo, fixedClock)
         vm.syncSession(authSession)
@@ -110,20 +110,23 @@ class SaleViewModelTest {
         vm.submitSale(authSession, activePrices, "sale_aa_1", "pay_aa_1")
         advanceUntilIdle()
 
-        // Double tap while submitting must be ignored
+        // Double tap before local snapshot arrives must be ignored
         assertTrue(vm.uiState.value.form.isSubmitting)
         vm.submitSale(authSession, activePrices, "sale_aa_2", "pay_aa_2")
         advanceUntilIdle()
         assertEquals(listOf("sale_aa_1"), repo.createdSaleIds)
 
-        repo.completePendingSuccess()
+        // Local snapshot emits pending write -> unlocks form immediately without server confirmation
+        repo.emitLatestLocally(isPendingWrite = true)
         advanceUntilIdle()
 
         assertFalse(vm.uiState.value.form.isSubmitting)
         assertNull(vm.uiState.value.form.saleError)
-        val created = vm.uiState.value.sales.first().sale
-        assertEquals(DeliveryStatus.PENDING, created.deliveryStatus)
-        assertEquals(37000L, created.total)
+        assertEquals("", vm.uiState.value.form.saleBucketsInput)
+        val created = vm.uiState.value.sales.first()
+        assertTrue(created.isPendingWrite)
+        assertEquals(DeliveryStatus.PENDING, created.sale.deliveryStatus)
+        assertEquals(37000L, created.sale.total)
         assertEquals(37000L, vm.uiState.value.paidAmountBySaleId["sale_aa_1"])
 
         vm.markSaleDelivered("sale_aa_1")
@@ -131,8 +134,7 @@ class SaleViewModelTest {
         val delivered = vm.uiState.value.sales.first().sale
         assertEquals(DeliveryStatus.DELIVERED, delivered.deliveryStatus)
         assertEquals(37000L, delivered.total)
-        assertEquals(created.lines, delivered.lines)
-        assertEquals(37000L, vm.uiState.value.paidAmountBySaleId["sale_aa_1"])
+        assertEquals(created.sale.lines, delivered.lines)
 
         vm.syncSession(SessionState.Unauthenticated)
         advanceUntilIdle()
@@ -141,8 +143,8 @@ class SaleViewModelTest {
     }
 
     @Test
-    fun `batch rejection exposes error and leaves no sale or payment persisted`() = runTest {
-        val repo = FakeSaleRepository(autoComplete = false)
+    fun `remote rejection of previous batch shows error without overwriting current form edits`() = runTest {
+        val repo = FakeSaleRepository(emitLocallyImmediately = true)
         val methodRepo = FakePaymentMethodRepository(listOf(cashMethod))
         val vm = SaleViewModel(repo, methodRepo, fixedClock)
         vm.syncSession(authSession)
@@ -153,16 +155,19 @@ class SaleViewModelTest {
             EggClassification.AA to ActivePriceResult.Found(activeAaPrice),
         )
         vm.onSaleBucketsChange("2")
-        vm.submitSale(authSession, activePrices, "sale_fail", "pay_fail")
+        vm.submitSale(authSession, activePrices, "sale_1", "pay_1")
         advanceUntilIdle()
-
-        repo.completePendingError("PERMISSION_DENIED")
-        advanceUntilIdle()
-
         assertFalse(vm.uiState.value.form.isSubmitting)
-        assertNotNull(vm.uiState.value.form.saleError)
-        assertTrue(vm.uiState.value.sales.isEmpty())
-        assertTrue(vm.uiState.value.paidAmountBySaleId.isEmpty())
+
+        // User starts preparing a second sale while first batch fails remotely
+        vm.onSaleBucketsChange("5")
+        vm.onSaleNoteChange("En edicion")
+        repo.triggerRemoteError("sale_1", "PERMISSION_DENIED")
+        advanceUntilIdle()
+
+        assertNotNull(vm.uiState.value.salesError)
+        assertEquals("5", vm.uiState.value.form.saleBucketsInput)
+        assertEquals("En edicion", vm.uiState.value.form.saleNoteInput)
         collectJob.cancel()
     }
 
@@ -188,15 +193,14 @@ class SaleViewModelTest {
         override fun observeActivePaymentMethods(): Flow<List<PaymentMethod>> = flow
     }
 
-    private class FakeSaleRepository(private val autoComplete: Boolean = true) : SaleRepository {
+    private class FakeSaleRepository(private val emitLocallyImmediately: Boolean = true) : SaleRepository {
         private val salesFlow = MutableStateFlow<List<ObservedSale>>(emptyList())
         private val paymentsFlow = MutableStateFlow<Map<String, List<Payment>>>(emptyMap())
         val createdSaleIds = mutableListOf<String>()
         var activeListeners = 0
 
-        private var pendingRequest: SaleWithPaymentRequest? = null
-        private var pendingSuccess: (() -> Unit)? = null
-        private var pendingError: ((String) -> Unit)? = null
+        private var lastRequest: SaleWithPaymentRequest? = null
+        private val errorHandlers = mutableMapOf<String, (String) -> Unit>()
 
         override fun observeSales(): Flow<List<ObservedSale>> = callbackFlow {
             activeListeners++
@@ -211,20 +215,18 @@ class SaleViewModelTest {
 
         override fun createPendingSaleWithFullPayment(
             request: SaleWithPaymentRequest,
-            onWriteSuccess: () -> Unit,
             onWriteError: (String) -> Unit,
         ) {
             createdSaleIds.add(request.saleId)
-            pendingRequest = request
-            pendingSuccess = onWriteSuccess
-            pendingError = onWriteError
-            if (autoComplete) {
-                completePendingSuccess()
+            lastRequest = request
+            errorHandlers[request.saleId] = onWriteError
+            if (emitLocallyImmediately) {
+                emitLatestLocally(isPendingWrite = true)
             }
         }
 
-        fun completePendingSuccess() {
-            val req = pendingRequest ?: return
+        fun emitLatestLocally(isPendingWrite: Boolean) {
+            val req = lastRequest ?: return
             val sale = Sale.createSingleLinePending(
                 SingleLineSaleRequest(
                     id = req.saleId,
@@ -239,15 +241,15 @@ class SaleViewModelTest {
                 ),
             )
             val payment = Payment.forFullSalePayment(req.paymentId, sale, req.methodId)
-            salesFlow.value = listOf(ObservedSale(sale = sale, isPendingWrite = false)) + salesFlow.value
+            salesFlow.value = listOf(ObservedSale(sale = sale, isPendingWrite = isPendingWrite)) + salesFlow.value
             paymentsFlow.value = paymentsFlow.value + (sale.id to listOf(payment))
-            pendingSuccess?.invoke()
-            pendingRequest = null
+            lastRequest = null
         }
 
-        fun completePendingError(message: String) {
-            pendingError?.invoke(message)
-            pendingRequest = null
+        fun triggerRemoteError(saleId: String, message: String) {
+            salesFlow.value = salesFlow.value.filterNot { it.sale.id == saleId }
+            paymentsFlow.value = paymentsFlow.value - saleId
+            errorHandlers[saleId]?.invoke(message)
         }
 
         override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) {

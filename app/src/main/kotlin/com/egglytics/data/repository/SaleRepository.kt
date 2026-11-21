@@ -31,7 +31,6 @@ interface SaleRepository {
 
     fun createPendingSaleWithFullPayment(
         request: SaleWithPaymentRequest,
-        onWriteSuccess: () -> Unit,
         onWriteError: (String) -> Unit,
     )
 

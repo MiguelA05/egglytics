@@ -77,7 +77,6 @@ class FirebaseSaleRepository @Inject constructor(
 
     override fun createPendingSaleWithFullPayment(
         request: SaleWithPaymentRequest,
-        onWriteSuccess: () -> Unit,
         onWriteError: (String) -> Unit,
     ) {
         val uid = auth.currentUser?.uid
@@ -152,7 +151,6 @@ class FirebaseSaleRepository @Inject constructor(
         batch.set(businessRef.collection("sales").document(sale.id), salePayload)
         batch.set(businessRef.collection("payments").document(payment.id), paymentPayload)
         batch.commit()
-            .addOnSuccessListener { onWriteSuccess() }
             .addOnFailureListener { ex ->
                 onWriteError(ex.localizedMessage ?: "No se pudo guardar la venta con su pago.")
             }

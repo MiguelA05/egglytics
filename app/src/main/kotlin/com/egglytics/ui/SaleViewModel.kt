@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import java.time.Clock
@@ -59,7 +60,8 @@ class SaleViewModel @Inject constructor(
 
     private val activeUid = MutableStateFlow<String?>(null)
     private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
-    private val deliveryError = MutableStateFlow<String?>(null)
+    private val pendingLocalSaleId = MutableStateFlow<String?>(null)
+    private val remoteBatchError = MutableStateFlow<String?>(null)
 
     private val observedSales = activeUid
         .flatMapLatest { uid ->
@@ -67,6 +69,20 @@ class SaleViewModel @Inject constructor(
                 flowOf(Pair(emptyList<ObservedSale>(), null as String?))
             } else {
                 saleRepository.observeSales()
+                    .onEach { items ->
+                        val awaitingId = pendingLocalSaleId.value
+                        if (awaitingId != null && items.any { it.sale.id == awaitingId }) {
+                            pendingLocalSaleId.value = null
+                            formState.update { current ->
+                                current.copy(
+                                    saleBucketsInput = "",
+                                    saleNoteInput = "",
+                                    isSubmitting = false,
+                                    saleError = null,
+                                )
+                            }
+                        }
+                    }
                     .map { items -> Pair(items, null as String?) }
                     .catch { ex ->
                         emit(Pair(emptyList(), ex.localizedMessage ?: "Error al consultar ventas."))
@@ -102,8 +118,8 @@ class SaleViewModel @Inject constructor(
         observedSales,
         observedPaymentMethods,
         observedPayments,
-        deliveryError,
-    ) { form, salesRes, methodsRes, paymentsBySale, delivErr ->
+        remoteBatchError,
+    ) { form, salesRes, methodsRes, paymentsBySale, remoteErr ->
         val methods = methodsRes.first
         val effectiveMethodId = when {
             form.selectedMethodId != null && methods.any { it.id == form.selectedMethodId } -> form.selectedMethodId
@@ -115,7 +131,7 @@ class SaleViewModel @Inject constructor(
             paymentMethods = methods,
             sales = salesRes.first,
             paidAmountBySaleId = paidAmounts,
-            salesError = delivErr ?: salesRes.second ?: methodsRes.second,
+            salesError = remoteErr ?: salesRes.second ?: methodsRes.second,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -128,8 +144,9 @@ class SaleViewModel @Inject constructor(
         if (activeUid.value != nextUid) {
             activeUid.value = nextUid
             if (nextUid == null) {
+                pendingLocalSaleId.value = null
                 formState.value = initialFormState(OperationalDate.today(clock))
-                deliveryError.value = null
+                remoteBatchError.value = null
             }
         }
     }
@@ -218,6 +235,8 @@ class SaleViewModel @Inject constructor(
             return
         }
 
+        pendingLocalSaleId.value = saleId
+        remoteBatchError.value = null
         formState.update { it.copy(isSubmitting = true, saleError = null) }
 
         saleRepository.createPendingSaleWithFullPayment(
@@ -232,33 +251,22 @@ class SaleViewModel @Inject constructor(
                 methodId = methodId,
                 note = state.saleNoteInput,
             ),
-            onWriteSuccess = {
-                formState.update { current ->
-                    current.copy(
-                        saleBucketsInput = "",
-                        saleNoteInput = "",
-                        isSubmitting = false,
-                        saleError = null,
-                    )
-                }
-            },
             onWriteError = { err ->
-                formState.update { current ->
-                    current.copy(
-                        isSubmitting = false,
-                        saleError = err,
-                    )
+                if (pendingLocalSaleId.value == saleId) {
+                    pendingLocalSaleId.value = null
+                    formState.update { it.copy(isSubmitting = false) }
                 }
+                remoteBatchError.value = err
             },
         )
     }
 
     fun markSaleDelivered(saleId: String) {
-        deliveryError.value = null
+        remoteBatchError.value = null
         saleRepository.markDelivered(
             saleId = saleId,
             onWriteError = { err ->
-                deliveryError.value = err
+                remoteBatchError.value = err
             },
         )
     }
