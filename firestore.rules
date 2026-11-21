@@ -92,6 +92,23 @@ service cloud.firestore {
           && request.resource.data.discarded >= 0;
       }
 
+      match /reversals/{id} {
+        allow read: if isActive(b);
+        allow create: if isAdmin(b) && validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'targetCollection', 'targetId', 'reason'])
+          && request.resource.data.reason is string
+          && request.resource.data.reason.size() > 0
+          && request.resource.data.targetCollection in ['openingBalances', 'harvests', 'sales',
+               'payments', 'saleReturns', 'eggOutflows', 'feedPurchases', 'feedDepletions',
+               'feedLosses', 'expenses', 'withdrawals']
+          && request.resource.data.targetId is string
+          && request.resource.data.targetId.size() > 0
+          && !request.resource.data.targetId.matches('.*[/].*')
+          && exists(/databases/$(database)/documents/businesses/$(b)/$(request.resource.data.targetCollection)/$(request.resource.data.targetId));
+      }
+
       match /sales/{id} {
         allow read: if isActive(b);
         allow create: if validMovement(b)
