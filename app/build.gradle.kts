@@ -23,8 +23,19 @@ android {
     }
 
     buildTypes {
+        debug {
+            val emulatorHost = (project.findProperty("EMULATOR_HOST") as String?) ?: "10.0.2.2"
+            buildConfigField("boolean", "USE_FIREBASE_EMULATOR", "true")
+            buildConfigField("String", "FIREBASE_EMULATOR_HOST", "\"$emulatorHost\"")
+            buildConfigField("int", "FIREBASE_AUTH_EMULATOR_PORT", "9099")
+            buildConfigField("int", "FIRESTORE_EMULATOR_PORT", "8080")
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField("boolean", "USE_FIREBASE_EMULATOR", "false")
+            buildConfigField("String", "FIREBASE_EMULATOR_HOST", "\"\"")
+            buildConfigField("int", "FIREBASE_AUTH_EMULATOR_PORT", "0")
+            buildConfigField("int", "FIRESTORE_EMULATOR_PORT", "0")
         }
     }
 

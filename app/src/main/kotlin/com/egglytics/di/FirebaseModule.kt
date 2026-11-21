@@ -1,6 +1,7 @@
 package com.egglytics.di
 
 import android.content.Context
+import com.egglytics.BuildConfig
 import com.egglytics.data.repository.FirebasePriceRepository
 import com.egglytics.data.repository.FirebaseSessionRepository
 import com.egglytics.data.repository.PriceRepository
@@ -29,6 +30,9 @@ object FirebaseModule {
     private fun ensureFirebaseApp(context: Context): FirebaseApp {
         val existing = FirebaseApp.getApps(context).firstOrNull()
         if (existing != null) return existing
+        check(BuildConfig.USE_FIREBASE_EMULATOR) {
+            "FirebaseApp no inicializado en release: falta google-services.json real."
+        }
         val fallbackOptions = FirebaseOptions.Builder()
             .setProjectId("demo-egglytics-test")
             .setApplicationId("1:000000000000:android:0000000000000000000000")
@@ -41,7 +45,14 @@ object FirebaseModule {
     @Singleton
     fun provideFirebaseAuth(@ApplicationContext context: Context): FirebaseAuth {
         val app = ensureFirebaseApp(context)
-        return FirebaseAuth.getInstance(app)
+        return FirebaseAuth.getInstance(app).apply {
+            if (BuildConfig.USE_FIREBASE_EMULATOR) {
+                useEmulator(
+                    BuildConfig.FIREBASE_EMULATOR_HOST,
+                    BuildConfig.FIREBASE_AUTH_EMULATOR_PORT,
+                )
+            }
+        }
     }
 
     @Provides
@@ -49,6 +60,12 @@ object FirebaseModule {
     fun provideFirebaseFirestore(@ApplicationContext context: Context): FirebaseFirestore {
         val app = ensureFirebaseApp(context)
         return FirebaseFirestore.getInstance(app).apply {
+            if (BuildConfig.USE_FIREBASE_EMULATOR) {
+                useEmulator(
+                    BuildConfig.FIREBASE_EMULATOR_HOST,
+                    BuildConfig.FIRESTORE_EMULATOR_PORT,
+                )
+            }
             firestoreSettings = FirebaseFirestoreSettings.Builder()
                 .setLocalCacheSettings(
                     PersistentCacheSettings.newBuilder()
