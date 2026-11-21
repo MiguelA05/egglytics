@@ -19,8 +19,9 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 4. **Tarea 2b (Hecha — `fb2b85e`):** Modelos (`Member`, `Price`, `ExpenseCategory`, `PaymentMethod`), `ActivePriceResult` y `GetActivePriceUseCase` en `:domain`.
 5. ~~**Tarea 3a-1:** Configuración de emulador y suite TypeScript (`firebase.json`, `firestore-tests/`, `.gitignore`) con 1 prueba trivial de reglas.~~ *(Hecha en `72077bb`)*
 6. ~~**Tarea 3a-2:** Reglas mínimas de Firestore (`members`, `businesses`, `payments`, `validMovement` y regla provisional de `saleReturns`) con sus pruebas en `@firebase/rules-unit-testing`.~~ *(Hecha en `be8a80b`)*
-7. ~~**Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).~~ *(Hecha — pendiente de commit)*
-8. **Tarea 3b:** Resto de reglas de Firestore (`prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y demás colecciones) y sus AC en el emulador.
+7. ~~**Tarea 4:** Medición en el emulador de accesos a documentos en reglas con lotes grandes + contraste con documentación oficial vigente de Firestore; decisión sobre dónde validar `startDate` (`§11.1`).~~ *(Hecha — `aecaec9`, `36d2865`, `f5a3acc`, `27b08f8`)*
+8a. **Tarea 3b-1:** Reglas de `reversals`, `sales` (creación y actualización de entrega `pending → delivered`) y `prices` (solo creación), más presupuesto de reversos en `§10.2`, con pruebas en emulador.
+8b. **Tarea 3b-2:** Resto de colecciones (`expenseCategories`, `paymentMethods`, `customers`, `openingBalances` y colecciones de movimientos) + `firestore.indexes.json`.
 9. **Tarea 5:** Capa `data`: inicialización de Firestore offline (`CACHE_SIZE_UNLIMITED`), Firebase Auth y repositorio de sesión/miembros probado en Kotlin contra el emulador.
 10. **Tarea 6:** Estado básico de sincronización (`RF-02` básico) y aviso al cerrar sesión con pendientes.
 11. **Tarea 7:** Capa `data` y `ui`: Login, navegación por rol y pantallas de Catálogos (solo Administrador).
@@ -81,7 +82,7 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
     - **M5** (quitar `existsAfter(...)` en `refund` de `validPaymentByType`): falla `9a-9d (AC-65)` en el caso `9c` — protege que todo `refund` esté atado atómicamente a un `saleReturn` existente tras el lote (`existsAfter`).
   - **Costo de lecturas a medir en Tarea 4:** las reglas actuales leen `memberData(b)` (para `isActive`/`isAdmin`/`isOperator`) y `businessData(b).startDate` (en `validMovement`) en cada escritura; la **Tarea 4** mide el total de accesos por operación y por lote para confirmar si es aceptable respecto al límite oficial.
 
-### Tarea 4 — Medición de accesos a documentos en reglas con lotes grandes *(Hecha)*
+### Tarea 4 — Medición de accesos a documentos en reglas con lotes grandes *(Hecha — `aecaec9`, `36d2865`, `f5a3acc`, `27b08f8`)*
 - **Objetivo:**
   1. Consultar la documentación oficial vigente de Firestore sobre límites de accesos a documentos (`get`/`exists`/`existsAfter`) por operación (10) y por lote (`WriteBatch`, 20), y verificar si el emulador aplica el mismo límite.
   2. Medir en el emulador (`firestore-tests/measure/batch_limits.ts`) 4 variantes (`A`, `B`, `C`, `D`) con lotes crecientes de `1..30` pagos (`type == 'payment'`), devolución con `refund` (`1 saleReturns + 1 payment`) y cierre (`3 counts + 1 closings`).
@@ -99,18 +100,38 @@ Basado en [ESPECIFICACION.md](ESPECIFICACION.md) v2.3.
 
 - **Conclusión de la medición:** ninguna variante falló hasta 30 pagos; o el emulador no aplica el límite de 20 o cachea las rutas repetidas a lo largo del lote, y la medición no distingue entre ambas. En cualquier caso, el emulador no sirve para validar este límite; manda la documentación (caso peor: suma por escritura sin caché entre operaciones, tope de 20 por `WriteBatch` y 10 por operación).
 - **Decisión:** adoptar la **variante B** con tope de **10 pagos por lote** (presupuesto: máximo **2** llamadas de acceso por pago); un abono con más de 10 ventas pendientes se aplica en varios lotes atómicos de hasta 10 pagos.
-- **Pendiente tras aplicar B en `firestore.rules`:**
-  - Verificar si `m != null` es redundante en `isActive`/`isAdmin`/`isOperator` (en la medición, el emulador registró `"evaluation error"` al faltar el documento del miembro, lo que sugiere que `get()` sobre un documento inexistente provoca un error y la comparación nunca se ejecuta). Se probará quitando `m != null` y ejecutando las pruebas; si no falla nada, es código redundante (no afirmarlo como hecho en `ESPECIFICACION.md` hasta comprobarlo).
-  - Ejecutar 3 mutaciones sobre B (una por vez, restaurando tras cada una):
-    - **M6:** quitar `m.data.active == true` de `isOperator` → esperado: falla `1d-write`.
-    - **M7:** quitar `m.data.role == 'admin'` de `isAdmin` → esperado: falla `10b`.
-    - **M8:** quitar el chequeo de rol (`m.data.role in ['admin', 'operator']`) de `isOperator` → esperado: falla el caso `viewer` (`11`).
-- **Verificación:** `firebase emulators:exec --project demo-egglytics-test --only firestore "npm --prefix firestore-tests run measure"` ejecutado con código de salida `0`.
+- **Verificación y cierre (variante B aplicada en `firestore.rules`, `27b08f8`):**
+  - **18/18 pruebas en verde** con variante B (incluyendo caso `11` de miembro activo con rol `viewer`).
+  - **Mutaciones ejecutadas sobre B (una por vez, todas matadas):**
+    - **M6** (quitar `m.data.active == true` de `isOperator`): falló `1d-write` (`17 pass, 1 fail`).
+    - **M7** (quitar `m.data.role == 'admin'` de `isAdmin`): falló `10b` (`17 pass, 1 fail`).
+    - **M8** (quitar `m.data.role in ['admin', 'operator']` de `isOperator`): falló `11` (`viewer_1`, `17 pass, 1 fail`).
+  - **Decisión sobre `m != null`:** **`m != null` se conserva** (guarda defensiva sin costo adicional de lecturas).
+  - **Recuento de accesos de reversos (a añadir al presupuesto de `§10.2` en la Tarea 3b-1):** un reverso = **4** accesos (`isAdmin`: miembro; `validMovement`/`isOperator`: miembro de nuevo + negocio; `exists` del destino); anulación conjunta devolución + `refund` (2 reversos en `WriteBatch`) = **8** accesos, muy por debajo del tope de 20 (no se reestructura `validMovement` para ahorrar una llamada).
 
-### Tarea 3b — Resto de reglas de Firestore y sus AC
-- **Objetivo:** Completar `firestore.rules` con `prices`, `expenseCategories`, `paymentMethods`, `reversals`, `sales`, `customers`, `openingBalances` y colecciones de movimientos, más `firestore.indexes.json`.
+### Tarea 3b-1 — Reglas de `reversals`, `sales` y `prices`
+- **Objetivo:** Añadir a `firestore.rules` las colecciones `reversals` (solo `admin`, `reason` no vacío, `targetCollection` permitido y `exists` del destino), `sales` (`create` con `pending`/`delivered` y `update` exclusivo para entrega `pending → delivered` con `diff().affectedKeys().hasOnly(...)`) y `prices` (solo creación por `admin`, sin `startDate`), y actualizar el presupuesto de reversos en `§10.2` de `docs/ESPECIFICACION.md` (`reverso = 4`, anulación conjunta `= 8`).
+- **Decisiones y notas:**
+  - `§11.1` **no** define lista cerrada de campos (`keys().hasOnly`) para `sales create` (solo valida `diff().affectedKeys().hasOnly` en `sales update`); se respeta `§11.1` tal cual.
+  - *Idea futura (sin implementar):* un ID de reverso determinista (`{colección}__{id}`) impediría anular dos veces el mismo movimiento; requeriría cambiar la convención de IDs en `ESPECIFICACION.md`.
+- **Mutaciones planificadas (una por vez, restaurando y comprobando `git diff` vacío tras cada una):**
+  1. Quitar `isAdmin(b)` de `reversals` → falla `R1`.
+  2. Quitar la lista de `targetCollection` permitidas de `reversals` → falla `R3`.
+  3. Quitar `exists(...)` del destino de `reversals` → falla `R4`.
+  4. Quitar `reason.size() > 0` de `reversals` → falla `R2`.
+  5. Quitar `diff(resource.data).affectedKeys().hasOnly(...)` de `sales update` → falla `S6`.
+  6. Quitar `resource.data.deliveryStatus == 'pending'` previo de `sales update` → falla `S5`.
+  7. Quitar `isAdmin(b)` de `prices` → falla `P1`.
 - **Requisitos / Reglas:** `RF-04`, `R-04`, `R-05`, `R-18`, `R-19`, `§11.1`.
 - **AC:** `AC-33`, `AC-34`, `AC-52`, `AC-58`, `AC-59`, `AC-64`.
+- **Archivos / Módulos:** `firestore.rules`, `docs/ESPECIFICACION.md` (`§10.2`), `firestore-tests/test/reversals_sales_prices.test.ts`.
+- **Nota de concurrencia en pruebas:** los archivos `test/*.test.ts` comparten instancia de emulador y `projectId` (`demo-egglytics-test`), por lo que deben ejecutarse en serie (`node --test --test-concurrency=1`) para que `clearFirestore()` / `seedTestData()` no se pisen entre procesos; mejora futura posible: usar `projectId` distintos por archivo (`singleProjectMode` del emulador lo impide hoy).
+- **Verificación:** Suite en `@firebase/rules-unit-testing` contra el emulador en verde.
+
+### Tarea 3b-2 — Resto de colecciones e índices
+- **Objetivo:** Completar `firestore.rules` con `expenseCategories`, `paymentMethods`, `customers`, `openingBalances` y colecciones de movimientos, más `firestore.indexes.json`.
+- **Requisitos / Reglas:** `RF-04`, `§8.5`, `§11.1`.
+- **AC:** `AC-33`, `AC-34`, `AC-52`, `AC-59`.
 - **Archivos / Módulos:** `firestore.rules`, `firestore.indexes.json`, `firestore-tests/test/*.test.ts`.
 - **Verificación:** Suite completa en `@firebase/rules-unit-testing` contra el emulador en verde.
 
