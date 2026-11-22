@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.hilt.android)
 }
 
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.egglytics"
     compileSdk = 36

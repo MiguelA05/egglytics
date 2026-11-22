@@ -35,17 +35,25 @@ import javax.inject.Singleton
 object FirebaseModule {
 
     private fun ensureFirebaseApp(context: Context): FirebaseApp {
-        val existing = FirebaseApp.getApps(context).firstOrNull()
-        if (existing != null) return existing
-        check(BuildConfig.USE_FIREBASE_EMULATOR) {
+        if (BuildConfig.USE_FIREBASE_EMULATOR) {
+            val apps = FirebaseApp.getApps(context)
+            val emulatorApp = apps.firstOrNull { it.options.projectId == "demo-egglytics-test" }
+            if (emulatorApp != null) return emulatorApp
+            val fallbackOptions = FirebaseOptions.Builder()
+                .setProjectId("demo-egglytics-test")
+                .setApplicationId("1:000000000000:android:0000000000000000000000")
+                .setApiKey("demo-api-key")
+                .build()
+            val hasDefault = apps.any { it.name == FirebaseApp.DEFAULT_APP_NAME }
+            return if (hasDefault) {
+                FirebaseApp.initializeApp(context, fallbackOptions, "emulator")
+            } else {
+                FirebaseApp.initializeApp(context, fallbackOptions)
+            }
+        }
+        return checkNotNull(FirebaseApp.getApps(context).firstOrNull()) {
             "FirebaseApp no inicializado en release: falta google-services.json real."
         }
-        val fallbackOptions = FirebaseOptions.Builder()
-            .setProjectId("demo-egglytics-test")
-            .setApplicationId("1:000000000000:android:0000000000000000000000")
-            .setApiKey("demo-api-key")
-            .build()
-        return FirebaseApp.initializeApp(context, fallbackOptions)
     }
 
     @Provides

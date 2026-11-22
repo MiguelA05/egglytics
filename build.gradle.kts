@@ -6,4 +6,5 @@ plugins {
     alias(libs.plugins.ksp) apply false
     alias(libs.plugins.hilt.android) apply false
     alias(libs.plugins.detekt) apply false
+    id("com.google.gms.google-services") version "4.6.0" apply false
 }
