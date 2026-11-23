@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -11,6 +12,25 @@ plugins {
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+val releaseStoreFilePath = keystoreProps.getProperty("storeFile")
+    ?: System.getenv("EGGLYTICS_STORE_FILE")
+val releaseStorePassword = keystoreProps.getProperty("storePassword")
+    ?: System.getenv("EGGLYTICS_STORE_PASSWORD")
+val releaseKeyAlias = keystoreProps.getProperty("keyAlias")
+    ?: System.getenv("EGGLYTICS_KEY_ALIAS")
+val releaseKeyPassword = keystoreProps.getProperty("keyPassword")
+    ?: System.getenv("EGGLYTICS_KEY_PASSWORD")
+val hasReleaseSigning = !releaseStoreFilePath.isNullOrBlank() &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.egglytics"
@@ -26,6 +46,17 @@ android {
         buildConfigField("String", "BUSINESS_ID", "\"egglytics_default\"")
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
             val emulatorHost = (project.findProperty("EMULATOR_HOST") as String?) ?: "10.0.2.2"
@@ -36,6 +67,9 @@ android {
         }
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             buildConfigField("boolean", "USE_FIREBASE_EMULATOR", "false")
             buildConfigField("String", "FIREBASE_EMULATOR_HOST", "\"\"")
             buildConfigField("int", "FIREBASE_AUTH_EMULATOR_PORT", "0")

@@ -11,6 +11,7 @@
 app/google-services.json
 *.jks
 *.keystore
+keystore.properties
 service-account*.json
 .firebase/
 firestore-tests/node_modules/
