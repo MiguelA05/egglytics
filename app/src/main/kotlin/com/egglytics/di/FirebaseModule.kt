@@ -2,7 +2,11 @@ package com.egglytics.di
 
 import android.content.Context
 import com.egglytics.BuildConfig
+import com.egglytics.data.repository.ExpenseAndWithdrawalRepository
+import com.egglytics.data.repository.ExpenseCategoryRepository
 import com.egglytics.data.repository.FeedRepository
+import com.egglytics.data.repository.FirebaseExpenseAndWithdrawalRepository
+import com.egglytics.data.repository.FirebaseExpenseCategoryRepository
 import com.egglytics.data.repository.FirebaseFeedRepository
 import com.egglytics.data.repository.FirebaseHarvestRepository
 import com.egglytics.data.repository.FirebasePaymentMethodRepository
@@ -23,6 +27,7 @@ import com.egglytics.data.repository.SubmissionReceiptStore
 import com.egglytics.data.repository.SubmissionReconciler
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.GetActivePriceUseCase
+import com.egglytics.domain.usecase.GetCashAndResultUseCase
 import com.egglytics.domain.usecase.GetDailySummaryUseCase
 import com.egglytics.domain.usecase.GetFeedBalanceUseCase
 import com.egglytics.domain.usecase.ValidateSaleReversalUseCase
@@ -116,6 +121,9 @@ object FirebaseModule {
     fun provideGetFeedBalanceUseCase(): GetFeedBalanceUseCase = GetFeedBalanceUseCase()
 
     @Provides
+    fun provideGetCashAndResultUseCase(): GetCashAndResultUseCase = GetCashAndResultUseCase()
+
+    @Provides
     fun provideValidateSaleReversalUseCase(): ValidateSaleReversalUseCase = ValidateSaleReversalUseCase()
 
     @Provides
@@ -145,6 +153,16 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindFeedRepository(impl: FirebaseFeedRepository): FeedRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindExpenseCategoryRepository(impl: FirebaseExpenseCategoryRepository): ExpenseCategoryRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindExpenseAndWithdrawalRepository(
+        impl: FirebaseExpenseAndWithdrawalRepository,
+    ): ExpenseAndWithdrawalRepository
 
     @Binds
     @Singleton

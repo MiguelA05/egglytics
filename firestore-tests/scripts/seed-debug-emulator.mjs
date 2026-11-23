@@ -64,6 +64,26 @@ async function main() {
         name: "Nequi",
         active: true,
       });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/expenseCategories/fuel`), {
+        name: "Combustible",
+        active: true,
+      });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/expenseCategories/packaging`), {
+        name: "Empaques",
+        active: true,
+      });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/expenseCategories/medicine`), {
+        name: "Medicamentos",
+        active: true,
+      });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/expenseCategories/maintenance`), {
+        name: "Mantenimiento",
+        active: true,
+      });
+      await setDoc(doc(db, `businesses/${BUSINESS_ID}/expenseCategories/other`), {
+        name: "Otros",
+        active: true,
+      });
     });
   } finally {
     await env.cleanup();

@@ -35,6 +35,8 @@ fun HomeScreen(
     onOpenHarvests: () -> Unit,
     onOpenSales: () -> Unit,
     onOpenFeed: () -> Unit,
+    onOpenExpenses: () -> Unit,
+    onOpenCash: () -> Unit,
     onRetryReconcile: () -> Unit,
     onDismissSyncNotice: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -102,6 +104,24 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Alimento")
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Button(
+                        onClick = onOpenExpenses,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Gastos")
+                    }
+                    Button(
+                        onClick = onOpenCash,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Caja")
                     }
                 }
             }
@@ -196,7 +216,7 @@ fun HomeScreen(
                                 -> onOpenFeed()
                                 SubmissionKind.EXPENSE,
                                 SubmissionKind.WITHDRAWAL,
-                                -> onOpenHarvests()
+                                -> onOpenExpenses()
                             }
                         },
                         onRetryReconcile = onRetryReconcile,

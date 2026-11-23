@@ -35,6 +35,26 @@ class FirebasePaymentMethodRepository @Inject constructor(
             }
         awaitClose { registration.remove() }
     }
+
+    override fun observeAllPaymentMethods(): Flow<List<PaymentMethod>> = callbackFlow {
+        val registration = firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("paymentMethods")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val methods = snapshot.documents
+                        .mapNotNull { it.toPaymentMethodOrNull() }
+                        .sortedBy { it.name }
+                    trySend(methods)
+                }
+            }
+        awaitClose { registration.remove() }
+    }
 }
 
 private fun DocumentSnapshot.toPaymentMethodOrNull(): PaymentMethod? {

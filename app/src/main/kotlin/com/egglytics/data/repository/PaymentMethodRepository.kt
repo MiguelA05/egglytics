@@ -5,4 +5,6 @@ import kotlinx.coroutines.flow.Flow
 
 interface PaymentMethodRepository {
     fun observeActivePaymentMethods(): Flow<List<PaymentMethod>>
+
+    fun observeAllPaymentMethods(): Flow<List<PaymentMethod>> = observeActivePaymentMethods()
 }

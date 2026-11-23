@@ -10,6 +10,10 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
 import com.egglytics.ui.AppDestination
+import com.egglytics.ui.CashScreen
+import com.egglytics.ui.CashViewModel
+import com.egglytics.ui.ExpensesScreen
+import com.egglytics.ui.ExpensesViewModel
 import com.egglytics.ui.FeedScreen
 import com.egglytics.ui.FeedViewModel
 import com.egglytics.ui.HarvestScreen
@@ -30,6 +34,8 @@ class MainActivity : ComponentActivity() {
     private val harvestViewModel: HarvestViewModel by viewModels()
     private val saleViewModel: SaleViewModel by viewModels()
     private val feedViewModel: FeedViewModel by viewModels()
+    private val expensesViewModel: ExpensesViewModel by viewModels()
+    private val cashViewModel: CashViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,6 +49,8 @@ class MainActivity : ComponentActivity() {
                     harvestViewModel.syncSession(session)
                     saleViewModel.syncSession(session)
                     feedViewModel.syncSession(session)
+                    expensesViewModel.syncSession(session)
+                    cashViewModel.syncSession(session)
                 }
 
                 when (session) {
@@ -71,6 +79,8 @@ class MainActivity : ComponentActivity() {
                                     onOpenHarvests = { sessionViewModel.navigateTo(AppDestination.HARVESTS) },
                                     onOpenSales = { sessionViewModel.navigateTo(AppDestination.SALES) },
                                     onOpenFeed = { sessionViewModel.navigateTo(AppDestination.FEED) },
+                                    onOpenExpenses = { sessionViewModel.navigateTo(AppDestination.EXPENSES) },
+                                    onOpenCash = { sessionViewModel.navigateTo(AppDestination.CASH) },
                                     onRetryReconcile = homeViewModel::retryReconcile,
                                     onDismissSyncNotice = homeViewModel::dismissSyncNotice,
                                     onSignOut = sessionViewModel::signOut,
@@ -135,6 +145,34 @@ class MainActivity : ComponentActivity() {
                                     onPeriodStartChange = feedViewModel::onPeriodStartChange,
                                     onPeriodEndChange = feedViewModel::onPeriodEndChange,
                                     onSubmit = { feedViewModel.submit(session) },
+                                )
+                            }
+
+                            AppDestination.EXPENSES -> {
+                                val expensesUi by expensesViewModel.uiState.collectAsStateWithLifecycle()
+                                ExpensesScreen(
+                                    currency = session.business.currency,
+                                    state = expensesUi,
+                                    onBack = sessionViewModel::navigateHome,
+                                    onModeChange = expensesViewModel::onModeChange,
+                                    onAmountChange = expensesViewModel::onAmountChange,
+                                    onCategorySelect = expensesViewModel::onCategorySelect,
+                                    onMethodSelect = expensesViewModel::onMethodSelect,
+                                    onDateChange = expensesViewModel::onDateChange,
+                                    onDescriptionChange = expensesViewModel::onDescriptionChange,
+                                    onNoteChange = expensesViewModel::onNoteChange,
+                                    onSubmit = { expensesViewModel.submit(session) },
+                                )
+                            }
+
+                            AppDestination.CASH -> {
+                                val cashUi by cashViewModel.uiState.collectAsStateWithLifecycle()
+                                CashScreen(
+                                    currency = session.business.currency,
+                                    state = cashUi,
+                                    onBack = sessionViewModel::navigateHome,
+                                    onPeriodStartChange = cashViewModel::onPeriodStartChange,
+                                    onPeriodEndChange = cashViewModel::onPeriodEndChange,
                                 )
                             }
                         }

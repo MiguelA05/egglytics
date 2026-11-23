@@ -61,6 +61,15 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /expenseCategories/{id} {
+        allow read: if isActive(b);
+        allow create, update: if isAdmin(b)
+          && request.resource.data.keys().hasOnly(['name', 'active'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.active is bool;
+      }
+
       // Los precios no son movimientos: sin fechaOperativa ni restricción de startDate (§8.1).
       match /prices/{id} {
         function validPrice(d) {
@@ -223,6 +232,33 @@ service cloud.firestore {
           && request.resource.data.type in ['waste', 'loss', 'other']
           && request.resource.data.reason is string
           && request.resource.data.reason.size() > 0;
+      }
+
+      match /expenses/{id} {
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'categoryId', 'amount', 'methodId', 'description'])
+          && request.resource.data.categoryId is string
+          && request.resource.data.categoryId.size() > 0
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.methodId is string
+          && request.resource.data.methodId.size() > 0
+          && (!('description' in request.resource.data) || request.resource.data.description is string);
+      }
+
+      match /withdrawals/{id} {
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'amount', 'methodId'])
+          && request.resource.data.amount is int
+          && request.resource.data.amount > 0
+          && request.resource.data.methodId is string
+          && request.resource.data.methodId.size() > 0;
       }
     }
   }
