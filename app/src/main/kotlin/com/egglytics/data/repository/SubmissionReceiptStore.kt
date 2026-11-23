@@ -6,6 +6,11 @@ import java.time.LocalDate
 enum class SubmissionKind {
     HARVEST,
     SALE_WITH_PAYMENT,
+    FEED_PURCHASE,
+    FEED_DEPLETION,
+    FEED_LOSS,
+    EXPENSE,
+    WITHDRAWAL,
 }
 
 enum class SubmissionSyncStatus {

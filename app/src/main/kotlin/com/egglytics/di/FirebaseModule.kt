@@ -2,6 +2,8 @@ package com.egglytics.di
 
 import android.content.Context
 import com.egglytics.BuildConfig
+import com.egglytics.data.repository.FeedRepository
+import com.egglytics.data.repository.FirebaseFeedRepository
 import com.egglytics.data.repository.FirebaseHarvestRepository
 import com.egglytics.data.repository.FirebasePaymentMethodRepository
 import com.egglytics.data.repository.FirebasePriceRepository
@@ -22,6 +24,7 @@ import com.egglytics.data.repository.SubmissionReconciler
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.GetActivePriceUseCase
 import com.egglytics.domain.usecase.GetDailySummaryUseCase
+import com.egglytics.domain.usecase.GetFeedBalanceUseCase
 import com.egglytics.domain.usecase.ValidateSaleReversalUseCase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
@@ -110,6 +113,9 @@ object FirebaseModule {
     fun provideGetDailySummaryUseCase(): GetDailySummaryUseCase = GetDailySummaryUseCase()
 
     @Provides
+    fun provideGetFeedBalanceUseCase(): GetFeedBalanceUseCase = GetFeedBalanceUseCase()
+
+    @Provides
     fun provideValidateSaleReversalUseCase(): ValidateSaleReversalUseCase = ValidateSaleReversalUseCase()
 
     @Provides
@@ -135,6 +141,10 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindHarvestRepository(impl: FirebaseHarvestRepository): HarvestRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindFeedRepository(impl: FirebaseFeedRepository): FeedRepository
 
     @Binds
     @Singleton

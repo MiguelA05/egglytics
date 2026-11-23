@@ -18,6 +18,11 @@ class FirebaseRemoteSubmissionVerifier @Inject constructor(
         val primaryRef = when (receipt.kind) {
             SubmissionKind.HARVEST -> businessRef.collection("harvests").document(receipt.primaryDocId)
             SubmissionKind.SALE_WITH_PAYMENT -> businessRef.collection("sales").document(receipt.primaryDocId)
+            SubmissionKind.FEED_PURCHASE -> businessRef.collection("feedPurchases").document(receipt.primaryDocId)
+            SubmissionKind.FEED_DEPLETION -> businessRef.collection("feedDepletions").document(receipt.primaryDocId)
+            SubmissionKind.FEED_LOSS -> businessRef.collection("feedLosses").document(receipt.primaryDocId)
+            SubmissionKind.EXPENSE -> businessRef.collection("expenses").document(receipt.primaryDocId)
+            SubmissionKind.WITHDRAWAL -> businessRef.collection("withdrawals").document(receipt.primaryDocId)
         }
         val secondaryRef = receipt.secondaryDocId?.let { paymentId ->
             businessRef.collection("payments").document(paymentId)

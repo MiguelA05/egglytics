@@ -34,6 +34,7 @@ fun HomeScreen(
     homeState: HomeUiState,
     onOpenHarvests: () -> Unit,
     onOpenSales: () -> Unit,
+    onOpenFeed: () -> Unit,
     onRetryReconcile: () -> Unit,
     onDismissSyncNotice: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -95,6 +96,12 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Ventas")
+                    }
+                    Button(
+                        onClick = onOpenFeed,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Alimento")
                     }
                 }
             }
@@ -183,6 +190,13 @@ fun HomeScreen(
                             when (notice.kind) {
                                 SubmissionKind.HARVEST -> onOpenHarvests()
                                 SubmissionKind.SALE_WITH_PAYMENT -> onOpenSales()
+                                SubmissionKind.FEED_PURCHASE,
+                                SubmissionKind.FEED_DEPLETION,
+                                SubmissionKind.FEED_LOSS,
+                                -> onOpenFeed()
+                                SubmissionKind.EXPENSE,
+                                SubmissionKind.WITHDRAWAL,
+                                -> onOpenHarvests()
                             }
                         },
                         onRetryReconcile = onRetryReconcile,
@@ -265,6 +279,11 @@ private fun SyncNoticeCard(
     val kindLabel = when (notice.kind) {
         SubmissionKind.HARVEST -> "Recolección"
         SubmissionKind.SALE_WITH_PAYMENT -> "Venta + pago"
+        SubmissionKind.FEED_PURCHASE -> "Compra de alimento"
+        SubmissionKind.FEED_DEPLETION -> "Agotamiento de alimento"
+        SubmissionKind.FEED_LOSS -> "Pérdida de alimento"
+        SubmissionKind.EXPENSE -> "Gasto"
+        SubmissionKind.WITHDRAWAL -> "Retiro"
     }
     val statusLabel = when (notice.status) {
         SubmissionSyncStatus.REJECTED -> "Rechazado al sincronizar"
@@ -275,6 +294,12 @@ private fun SyncNoticeCard(
     val destinationLabel = when (notice.kind) {
         SubmissionKind.HARVEST -> "Ir a Recolección"
         SubmissionKind.SALE_WITH_PAYMENT -> "Ir a Ventas"
+        SubmissionKind.FEED_PURCHASE,
+        SubmissionKind.FEED_DEPLETION,
+        SubmissionKind.FEED_LOSS,
+        -> "Ir a Alimento"
+        SubmissionKind.EXPENSE -> "Ir a Gastos"
+        SubmissionKind.WITHDRAWAL -> "Ir a Gastos"
     }
     val idsLabel = if (notice.secondaryDocId != null) {
         "ID: ${notice.primaryDocId} · Pago: ${notice.secondaryDocId}"

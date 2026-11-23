@@ -10,6 +10,8 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
 import com.egglytics.ui.AppDestination
+import com.egglytics.ui.FeedScreen
+import com.egglytics.ui.FeedViewModel
 import com.egglytics.ui.HarvestScreen
 import com.egglytics.ui.HarvestViewModel
 import com.egglytics.ui.HomeScreen
@@ -27,6 +29,7 @@ class MainActivity : ComponentActivity() {
     private val homeViewModel: HomeViewModel by viewModels()
     private val harvestViewModel: HarvestViewModel by viewModels()
     private val saleViewModel: SaleViewModel by viewModels()
+    private val feedViewModel: FeedViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +42,7 @@ class MainActivity : ComponentActivity() {
                     homeViewModel.syncSession(session)
                     harvestViewModel.syncSession(session)
                     saleViewModel.syncSession(session)
+                    feedViewModel.syncSession(session)
                 }
 
                 when (session) {
@@ -66,6 +70,7 @@ class MainActivity : ComponentActivity() {
                                     homeState = homeUi,
                                     onOpenHarvests = { sessionViewModel.navigateTo(AppDestination.HARVESTS) },
                                     onOpenSales = { sessionViewModel.navigateTo(AppDestination.SALES) },
+                                    onOpenFeed = { sessionViewModel.navigateTo(AppDestination.FEED) },
                                     onRetryReconcile = homeViewModel::retryReconcile,
                                     onDismissSyncNotice = homeViewModel::dismissSyncNotice,
                                     onSignOut = sessionViewModel::signOut,
@@ -107,6 +112,29 @@ class MainActivity : ComponentActivity() {
                                     onVoidSale = { item, reason ->
                                         saleViewModel.voidSale(session, item, reason)
                                     },
+                                )
+                            }
+
+                            AppDestination.FEED -> {
+                                val feedUi by feedViewModel.uiState.collectAsStateWithLifecycle()
+                                FeedScreen(
+                                    currency = session.business.currency,
+                                    state = feedUi,
+                                    onBack = sessionViewModel::navigateHome,
+                                    onModeChange = feedViewModel::onModeChange,
+                                    onIngredientChange = feedViewModel::onIngredientChange,
+                                    onBagsChange = feedViewModel::onBagsChange,
+                                    onTotalCostChange = feedViewModel::onTotalCostChange,
+                                    onMethodSelect = feedViewModel::onMethodSelect,
+                                    onSupplierChange = feedViewModel::onSupplierChange,
+                                    onLossKgChange = feedViewModel::onLossKgChange,
+                                    onLossTypeChange = feedViewModel::onLossTypeChange,
+                                    onLossReasonChange = feedViewModel::onLossReasonChange,
+                                    onDateChange = feedViewModel::onDateChange,
+                                    onNoteChange = feedViewModel::onNoteChange,
+                                    onPeriodStartChange = feedViewModel::onPeriodStartChange,
+                                    onPeriodEndChange = feedViewModel::onPeriodEndChange,
+                                    onSubmit = { feedViewModel.submit(session) },
                                 )
                             }
                         }

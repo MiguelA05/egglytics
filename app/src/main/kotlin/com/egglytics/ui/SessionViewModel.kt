@@ -25,6 +25,7 @@ enum class AppDestination {
     HOME,
     HARVESTS,
     SALES,
+    FEED,
 }
 
 data class SessionUiState(

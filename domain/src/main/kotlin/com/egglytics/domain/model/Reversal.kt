@@ -4,10 +4,16 @@ import java.time.Instant
 import java.time.LocalDate
 
 enum class ReversalTargetCollection(val firestoreValue: String) {
+    OPENING_BALANCES("openingBalances"),
     HARVESTS("harvests"),
     SALES("sales"),
     PAYMENTS("payments"),
     SALE_RETURNS("saleReturns"),
+    FEED_PURCHASES("feedPurchases"),
+    FEED_DEPLETIONS("feedDepletions"),
+    FEED_LOSSES("feedLosses"),
+    EXPENSES("expenses"),
+    WITHDRAWALS("withdrawals"),
     ;
 
     companion object {
