@@ -11,12 +11,15 @@ import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedSale
 import com.egglytics.data.repository.ObservedSalePayment
 import com.egglytics.data.repository.ObservedWithdrawal
+import com.egglytics.data.repository.OpeningAndCountRepository
 import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionState
+import com.egglytics.domain.model.OpeningBalance
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.PaymentMethod
+import com.egglytics.domain.model.PhysicalCount
 import com.egglytics.domain.model.SaleReturnSummary
 import com.egglytics.domain.usecase.CashAndResultRequest
 import com.egglytics.domain.usecase.CashAndResultSummary
@@ -50,6 +53,7 @@ class CashViewModel @Inject constructor(
     private val saleRepository: SaleRepository,
     private val feedRepository: FeedRepository,
     private val expenseAndWithdrawalRepository: ExpenseAndWithdrawalRepository,
+    private val openingAndCountRepository: OpeningAndCountRepository,
     private val reversalRepository: ReversalRepository,
     private val getCashAndResultUseCase: GetCashAndResultUseCase,
     private val clock: Clock,
@@ -93,10 +97,24 @@ class CashViewModel @Inject constructor(
         if (uid == null) flowOf(emptyList<ObservedFeedDepletion>())
         else feedRepository.observeDepletions().catch { emit(emptyList()) }
     }
+    private val openingsFlow = activeUid.flatMapLatest { uid ->
+        if (uid == null) flowOf(emptyList<OpeningBalance>())
+        else openingAndCountRepository.observeOpenings().catch { emit(emptyList()) }
+    }
+    private val countsFlow = activeUid.flatMapLatest { uid ->
+        if (uid == null) flowOf(emptyList<PhysicalCount>())
+        else openingAndCountRepository.observeCounts().catch { emit(emptyList()) }
+    }
     private val reversalsFlow = activeUid.flatMapLatest { uid ->
         if (uid == null) flowOf(emptyList<ObservedReversal>())
         else reversalRepository.observeReversals().catch { emit(emptyList()) }
     }
+
+    private val openingsCountsReversals = combine(
+        openingsFlow,
+        countsFlow,
+        reversalsFlow,
+    ) { openings, counts, reversals -> Triple(openings, counts, reversals) }
 
     private val salesAndPayments = combine(
         salesFlow,
@@ -118,8 +136,8 @@ class CashViewModel @Inject constructor(
         methodsFlow,
         salesAndPayments,
         outflows,
-        reversalsFlow,
-    ) { (startStr, endStr), methods, (sales, returns, paymentsBySale), out, reversals ->
+        openingsCountsReversals,
+    ) { (startStr, endStr), methods, (sales, returns, paymentsBySale), out, (openings, counts, reversals) ->
         val today = OperationalDate.today(clock)
         val start = runCatching { OperationalDate.parse(startStr.trim()) }.getOrDefault(today)
         val end = runCatching { OperationalDate.parse(endStr.trim()) }.getOrDefault(today)
@@ -127,6 +145,8 @@ class CashViewModel @Inject constructor(
         val summary = getCashAndResultUseCase(
             CashAndResultRequest(
                 methods = methods,
+                openings = openings,
+                counts = counts,
                 sales = sales.map { it.sale },
                 saleReturns = returns,
                 payments = allPayments.map { it.payment },

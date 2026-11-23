@@ -19,14 +19,21 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.egglytics.domain.model.FeedIngredient
 import com.egglytics.domain.model.FeedLossType
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.ui.components.SyncStatusBadge
+import com.egglytics.ui.components.VoidReasonDialog
 
 @Composable
 fun FeedScreen(
@@ -47,7 +54,22 @@ fun FeedScreen(
     onPeriodStartChange: (String) -> Unit,
     onPeriodEndChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onVoidMovement: (ReversalTargetCollection, String, String) -> Unit = { _, _, _ -> },
 ) {
+    var pendingVoid by remember { mutableStateOf<Triple<ReversalTargetCollection, String, String>?>(null) }
+
+    pendingVoid?.let { (targetCollection, targetId, description) ->
+        VoidReasonDialog(
+            title = "Anular movimiento",
+            description = description,
+            onDismiss = { pendingVoid = null },
+            onConfirm = { reason ->
+                onVoidMovement(targetCollection, targetId, reason)
+                pendingVoid = null
+            },
+        )
+    }
+
     Scaffold { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -104,6 +126,16 @@ fun FeedScreen(
                         Text(
                             text = "Saldo esperado (aprox. con bulto abierto): ${summary?.balanceKg ?: 0L} kg",
                             style = MaterialTheme.typography.bodyMedium,
+                        )
+                        val baseNote = when {
+                            summary == null -> "Sin base inicial"
+                            !summary.hasBase -> "Falta apertura o conteo base (usando 0 kg)"
+                            summary.baseSourceLabel != null -> "Base: ${summary.baseSourceLabel}"
+                            else -> "Base configurada"
+                        }
+                        Text(
+                            text = baseNote,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
                             text = "Consumo diario estimado (${summary?.inclusiveDays ?: 0L} días): " +
@@ -291,6 +323,7 @@ fun FeedScreen(
             }
 
             items(state.purchases, key = { "fp_${it.purchase.id}" }) { item ->
+                val revReason = state.reversedReasons["${ReversalTargetCollection.FEED_PURCHASES.firestoreValue}_${item.purchase.id}"]
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
@@ -307,6 +340,23 @@ fun FeedScreen(
                                 "${item.purchase.bags} bultos (+${item.purchase.totalKg} kg) · ${item.purchase.totalCost} $currency",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (revReason != null) {
+                                Text(
+                                    "Anulado · Motivo: $revReason",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else if (state.isAdmin) {
+                                TextButton(
+                                    onClick = {
+                                        pendingVoid = Triple(
+                                            ReversalTargetCollection.FEED_PURCHASES,
+                                            item.purchase.id,
+                                            "Compra ${ingredientLabel(item.purchase.ingredient)} (${item.purchase.bags} bultos)",
+                                        )
+                                    },
+                                ) { Text("Anular") }
+                            }
                         }
                         SyncStatusBadge(isPendingWrite = item.isPendingWrite)
                     }
@@ -314,6 +364,7 @@ fun FeedScreen(
             }
 
             items(state.depletions, key = { "fd_${it.depletion.id}" }) { item ->
+                val revReason = state.reversedReasons["${ReversalTargetCollection.FEED_DEPLETIONS.firestoreValue}_${item.depletion.id}"]
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
@@ -330,6 +381,23 @@ fun FeedScreen(
                                 "${item.depletion.bags} bultos (-${item.depletion.kg} kg)",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (revReason != null) {
+                                Text(
+                                    "Anulado · Motivo: $revReason",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else if (state.isAdmin) {
+                                TextButton(
+                                    onClick = {
+                                        pendingVoid = Triple(
+                                            ReversalTargetCollection.FEED_DEPLETIONS,
+                                            item.depletion.id,
+                                            "Agotado ${ingredientLabel(item.depletion.ingredient)} (${item.depletion.bags} bultos)",
+                                        )
+                                    },
+                                ) { Text("Anular") }
+                            }
                         }
                         SyncStatusBadge(isPendingWrite = item.isPendingWrite)
                     }
@@ -337,6 +405,7 @@ fun FeedScreen(
             }
 
             items(state.losses, key = { "fl_${it.loss.id}" }) { item ->
+                val revReason = state.reversedReasons["${ReversalTargetCollection.FEED_LOSSES.firestoreValue}_${item.loss.id}"]
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
@@ -353,6 +422,23 @@ fun FeedScreen(
                                 "-${item.loss.kg} kg · ${item.loss.reason}",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (revReason != null) {
+                                Text(
+                                    "Anulado · Motivo: $revReason",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else if (state.isAdmin) {
+                                TextButton(
+                                    onClick = {
+                                        pendingVoid = Triple(
+                                            ReversalTargetCollection.FEED_LOSSES,
+                                            item.loss.id,
+                                            "Pérdida ${ingredientLabel(item.loss.ingredient)} (-${item.loss.kg} kg)",
+                                        )
+                                    },
+                                ) { Text("Anular") }
+                            }
                         }
                         SyncStatusBadge(isPendingWrite = item.isPendingWrite)
                     }

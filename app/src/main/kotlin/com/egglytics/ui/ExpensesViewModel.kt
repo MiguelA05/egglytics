@@ -6,14 +6,18 @@ import com.egglytics.data.repository.ExpenseAndWithdrawalRepository
 import com.egglytics.data.repository.ExpenseCategoryRepository
 import com.egglytics.data.repository.ExpenseRequest
 import com.egglytics.data.repository.ObservedExpense
+import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedWithdrawal
 import com.egglytics.data.repository.PaymentMethodRepository
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.data.repository.WithdrawalRequest
 import com.egglytics.domain.model.ExpenseCategory
 import com.egglytics.domain.model.Harvest
+import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.PaymentMethod
+import com.egglytics.domain.model.ReversalTargetCollection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,10 +53,12 @@ data class ExpensesFormState(
 
 data class ExpensesUiState(
     val form: ExpensesFormState = ExpensesFormState(),
+    val isAdmin: Boolean = false,
     val categories: List<ExpenseCategory> = emptyList(),
     val paymentMethods: List<PaymentMethod> = emptyList(),
     val expenses: List<ObservedExpense> = emptyList(),
     val withdrawals: List<ObservedWithdrawal> = emptyList(),
+    val reversedReasons: Map<String, String> = emptyMap(),
     val error: String? = null,
 )
 
@@ -62,10 +68,12 @@ class ExpensesViewModel @Inject constructor(
     private val expenseAndWithdrawalRepository: ExpenseAndWithdrawalRepository,
     private val categoryRepository: ExpenseCategoryRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
+    private val reversalRepository: ReversalRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
     private val activeUid = MutableStateFlow<String?>(null)
+    private val isAdminFlow = MutableStateFlow(false)
     private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
     private val writeError = MutableStateFlow<String?>(null)
 
@@ -93,8 +101,19 @@ class ExpensesViewModel @Inject constructor(
             .catch { emit(emptyList<ObservedWithdrawal>() to (it.localizedMessage ?: "Error al consultar retiros.")) }
     }
 
-    private val catalogs = combine(observedCategories, observedMethods, writeError) { cats, methods, wErr ->
-        Triple(cats, methods, wErr)
+    private val observedReversals = activeUid.flatMapLatest { uid ->
+        if (uid == null) flowOf(emptyList<ObservedReversal>())
+        else reversalRepository.observeReversals().catch { emit(emptyList()) }
+    }
+
+    private val catalogs = combine(
+        observedCategories,
+        observedMethods,
+        observedReversals,
+        isAdminFlow,
+        writeError,
+    ) { cats, methods, reversals, isAdmin, wErr ->
+        ExpensesCatalogBundle(cats, methods, reversals, isAdmin, wErr)
     }
 
     val uiState: StateFlow<ExpensesUiState> = combine(
@@ -102,25 +121,32 @@ class ExpensesViewModel @Inject constructor(
         catalogs,
         observedExpenses,
         observedWithdrawals,
-    ) { form, (cats, methods, wErr), (expenses, expErr), (withdrawals, wdrErr) ->
+    ) { form, bundle, (expenses, expErr), (withdrawals, wdrErr) ->
         val effectiveCategoryId = when {
-            form.selectedCategoryId != null && cats.any { it.id == form.selectedCategoryId } -> form.selectedCategoryId
-            else -> cats.firstOrNull()?.id
+            form.selectedCategoryId != null && bundle.categories.any { it.id == form.selectedCategoryId } ->
+                form.selectedCategoryId
+            else -> bundle.categories.firstOrNull()?.id
         }
         val effectiveMethodId = when {
-            form.selectedMethodId != null && methods.any { it.id == form.selectedMethodId } -> form.selectedMethodId
-            else -> methods.firstOrNull()?.id
+            form.selectedMethodId != null && bundle.paymentMethods.any { it.id == form.selectedMethodId } ->
+                form.selectedMethodId
+            else -> bundle.paymentMethods.firstOrNull()?.id
+        }
+        val reversedReasons = bundle.reversals.associate {
+            "${it.reversal.targetCollection.firestoreValue}_${it.reversal.targetId}" to it.reversal.reason
         }
         ExpensesUiState(
             form = form.copy(
                 selectedCategoryId = effectiveCategoryId,
                 selectedMethodId = effectiveMethodId,
             ),
-            categories = cats,
-            paymentMethods = methods,
+            isAdmin = bundle.isAdmin,
+            categories = bundle.categories,
+            paymentMethods = bundle.paymentMethods,
             expenses = expenses,
             withdrawals = withdrawals,
-            error = listOfNotNull(wErr, expErr, wdrErr).firstOrNull(),
+            reversedReasons = reversedReasons,
+            error = listOfNotNull(bundle.writeError, expErr, wdrErr).firstOrNull(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -129,7 +155,9 @@ class ExpensesViewModel @Inject constructor(
     )
 
     fun syncSession(session: SessionState) {
-        val nextUid = (session as? SessionState.Authenticated)?.uid
+        val auth = session as? SessionState.Authenticated
+        val nextUid = auth?.uid
+        isAdminFlow.value = auth?.member?.role == MemberRole.ADMIN
         if (activeUid.value != nextUid) {
             activeUid.value = nextUid
             writeError.value = null
@@ -137,6 +165,23 @@ class ExpensesViewModel @Inject constructor(
                 formState.value = initialFormState(OperationalDate.today(clock))
             }
         }
+    }
+
+    fun voidMovement(
+        session: SessionState,
+        targetCollection: ReversalTargetCollection,
+        targetId: String,
+        reason: String,
+    ) {
+        val auth = session as? SessionState.Authenticated ?: return
+        reversalRepository.reverseMovement(
+            targetCollection = targetCollection,
+            targetId = targetId,
+            businessStartDate = auth.business.startDate,
+            reason = reason,
+            onSuccess = { writeError.value = null },
+            onError = { err -> writeError.value = err },
+        )
     }
 
     fun onModeChange(mode: ExpenseFormMode) = formState.update { it.copy(mode = mode, formError = null) }
@@ -218,3 +263,11 @@ class ExpensesViewModel @Inject constructor(
     private fun initialFormState(today: LocalDate): ExpensesFormState =
         ExpensesFormState(dateInput = OperationalDate.format(today))
 }
+
+private data class ExpensesCatalogBundle(
+    val categories: List<ExpenseCategory>,
+    val paymentMethods: List<PaymentMethod>,
+    val reversals: List<ObservedReversal>,
+    val isAdmin: Boolean,
+    val writeError: String?,
+)

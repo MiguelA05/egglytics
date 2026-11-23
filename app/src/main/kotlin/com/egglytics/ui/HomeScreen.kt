@@ -37,6 +37,7 @@ fun HomeScreen(
     onOpenFeed: () -> Unit,
     onOpenExpenses: () -> Unit,
     onOpenCash: () -> Unit,
+    onOpenCounts: () -> Unit,
     onRetryReconcile: () -> Unit,
     onDismissSyncNotice: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -123,6 +124,13 @@ fun HomeScreen(
                     ) {
                         Text("Caja")
                     }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onOpenCounts,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Conteos / Cierre")
                 }
             }
 

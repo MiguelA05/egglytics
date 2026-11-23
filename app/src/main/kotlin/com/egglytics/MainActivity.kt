@@ -12,6 +12,8 @@ import com.egglytics.data.repository.SessionState
 import com.egglytics.ui.AppDestination
 import com.egglytics.ui.CashScreen
 import com.egglytics.ui.CashViewModel
+import com.egglytics.ui.CountsAndOpeningScreen
+import com.egglytics.ui.CountsAndOpeningViewModel
 import com.egglytics.ui.ExpensesScreen
 import com.egglytics.ui.ExpensesViewModel
 import com.egglytics.ui.FeedScreen
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
     private val feedViewModel: FeedViewModel by viewModels()
     private val expensesViewModel: ExpensesViewModel by viewModels()
     private val cashViewModel: CashViewModel by viewModels()
+    private val countsAndOpeningViewModel: CountsAndOpeningViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +54,7 @@ class MainActivity : ComponentActivity() {
                     feedViewModel.syncSession(session)
                     expensesViewModel.syncSession(session)
                     cashViewModel.syncSession(session)
+                    countsAndOpeningViewModel.syncSession(session)
                 }
 
                 when (session) {
@@ -81,6 +85,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenFeed = { sessionViewModel.navigateTo(AppDestination.FEED) },
                                     onOpenExpenses = { sessionViewModel.navigateTo(AppDestination.EXPENSES) },
                                     onOpenCash = { sessionViewModel.navigateTo(AppDestination.CASH) },
+                                    onOpenCounts = { sessionViewModel.navigateTo(AppDestination.COUNTS) },
                                     onRetryReconcile = homeViewModel::retryReconcile,
                                     onDismissSyncNotice = homeViewModel::dismissSyncNotice,
                                     onSignOut = sessionViewModel::signOut,
@@ -145,6 +150,9 @@ class MainActivity : ComponentActivity() {
                                     onPeriodStartChange = feedViewModel::onPeriodStartChange,
                                     onPeriodEndChange = feedViewModel::onPeriodEndChange,
                                     onSubmit = { feedViewModel.submit(session) },
+                                    onVoidMovement = { col, id, reason ->
+                                        feedViewModel.voidFeedMovement(session, col, id, reason)
+                                    },
                                 )
                             }
 
@@ -162,6 +170,9 @@ class MainActivity : ComponentActivity() {
                                     onDescriptionChange = expensesViewModel::onDescriptionChange,
                                     onNoteChange = expensesViewModel::onNoteChange,
                                     onSubmit = { expensesViewModel.submit(session) },
+                                    onVoidMovement = { col, id, reason ->
+                                        expensesViewModel.voidMovement(session, col, id, reason)
+                                    },
                                 )
                             }
 
@@ -173,6 +184,24 @@ class MainActivity : ComponentActivity() {
                                     onBack = sessionViewModel::navigateHome,
                                     onPeriodStartChange = cashViewModel::onPeriodStartChange,
                                     onPeriodEndChange = cashViewModel::onPeriodEndChange,
+                                )
+                            }
+
+                            AppDestination.COUNTS -> {
+                                val countsUi by countsAndOpeningViewModel.uiState.collectAsStateWithLifecycle()
+                                CountsAndOpeningScreen(
+                                    currency = session.business.currency,
+                                    state = countsUi,
+                                    onBack = sessionViewModel::navigateHome,
+                                    onModeChange = countsAndOpeningViewModel::onModeChange,
+                                    onDateChange = countsAndOpeningViewModel::onDateChange,
+                                    onFeedPhysicalChange = countsAndOpeningViewModel::onFeedPhysicalChange,
+                                    onFeedReasonChange = countsAndOpeningViewModel::onFeedReasonChange,
+                                    onCashPhysicalChange = countsAndOpeningViewModel::onCashPhysicalChange,
+                                    onCashReasonChange = countsAndOpeningViewModel::onCashReasonChange,
+                                    onIsClosingChange = countsAndOpeningViewModel::onIsClosingChange,
+                                    onNoteChange = countsAndOpeningViewModel::onNoteChange,
+                                    onSubmit = { countsAndOpeningViewModel.submit(session) },
                                 )
                             }
                         }

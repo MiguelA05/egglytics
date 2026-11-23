@@ -1,12 +1,16 @@
 package com.egglytics.domain.usecase
 
+import com.egglytics.domain.model.CountKind
 import com.egglytics.domain.model.Expense
 import com.egglytics.domain.model.FeedDepletion
 import com.egglytics.domain.model.FeedIngredient
 import com.egglytics.domain.model.FeedPurchase
+import com.egglytics.domain.model.OpeningBalance
+import com.egglytics.domain.model.OpeningKind
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentMethod
 import com.egglytics.domain.model.PaymentType
+import com.egglytics.domain.model.PhysicalCount
 import com.egglytics.domain.model.Reversal
 import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
@@ -20,6 +24,7 @@ data class CashMethodBalance(
     val method: PaymentMethod,
     val baseAmount: Long,
     val hasBase: Boolean,
+    val baseSourceLabel: String? = null,
     val collections: Long,
     val refunds: Long,
     val expenses: Long,
@@ -47,6 +52,8 @@ data class CashAndResultSummary(
 data class CashAndResultRequest(
     val methods: List<PaymentMethod>,
     val baseByMethod: Map<String, Long> = emptyMap(),
+    val openings: List<OpeningBalance> = emptyList(),
+    val counts: List<PhysicalCount> = emptyList(),
     val sales: List<Sale> = emptyList(),
     val saleReturns: List<SaleReturnSummary> = emptyList(),
     val payments: List<Payment> = emptyList(),
@@ -79,7 +86,7 @@ class GetCashAndResultUseCase {
         )
 
         val methodBalances = request.methods.map { method ->
-            computeMethodBalance(method, request.baseByMethod, inputs)
+            computeMethodBalance(method, request, inputs)
         }
         val resultSummary = computeResultSummary(request, inputs)
 
@@ -92,10 +99,23 @@ class GetCashAndResultUseCase {
 
     private fun computeMethodBalance(
         method: PaymentMethod,
-        baseByMethod: Map<String, Long>,
+        request: CashAndResultRequest,
         inputs: ActiveCashInputs,
     ): CashMethodBalance {
-        val methodPayments = inputs.payments.filter { it.methodId == method.id }
+        val startPoint = StartingPointResolver.resolveForKey(
+            StartingPointQuery(
+                countKind = CountKind.CASH,
+                openingKind = OpeningKind.CASH,
+                key = method.id,
+                openings = request.openings,
+                counts = request.counts,
+                reversals = request.reversals,
+            ),
+        )
+        val methodPayments = inputs.payments.filter {
+            it.methodId == method.id &&
+                StartingPointResolver.movementEntersBalance(it.fechaOperativa, it.createdAt, startPoint)
+        }
         val collections = methodPayments
             .asSequence()
             .filter { it.type == PaymentType.PAYMENT }
@@ -104,14 +124,33 @@ class GetCashAndResultUseCase {
             .asSequence()
             .filter { it.type == PaymentType.REFUND || it.type == PaymentType.OVERPAYMENT_REFUND }
             .sumOf { it.amount }
-        val expenseTotal = inputs.expenses.asSequence().filter { it.methodId == method.id }.sumOf { it.amount }
-        val feedTotal = inputs.feedPurchases.asSequence().filter { it.methodId == method.id }.sumOf { it.totalCost }
-        val withdrawalTotal = inputs.withdrawals.asSequence().filter { it.methodId == method.id }.sumOf { it.amount }
+        val expenseTotal = inputs.expenses
+            .asSequence()
+            .filter {
+                it.methodId == method.id &&
+                    StartingPointResolver.movementEntersBalance(it.fechaOperativa, it.createdAt, startPoint)
+            }
+            .sumOf { it.amount }
+        val feedTotal = inputs.feedPurchases
+            .asSequence()
+            .filter {
+                it.methodId == method.id &&
+                    StartingPointResolver.movementEntersBalance(it.fechaOperativa, it.createdAt, startPoint)
+            }
+            .sumOf { it.totalCost }
+        val withdrawalTotal = inputs.withdrawals
+            .asSequence()
+            .filter {
+                it.methodId == method.id &&
+                    StartingPointResolver.movementEntersBalance(it.fechaOperativa, it.createdAt, startPoint)
+            }
+            .sumOf { it.amount }
 
         return CashMethodBalance(
             method = method,
-            baseAmount = baseByMethod[method.id] ?: 0L,
-            hasBase = method.id in baseByMethod,
+            baseAmount = startPoint?.quantity ?: (request.baseByMethod[method.id] ?: 0L),
+            hasBase = startPoint != null || method.id in request.baseByMethod,
+            baseSourceLabel = startPoint?.sourceLabel,
             collections = collections,
             refunds = refunds,
             expenses = expenseTotal,

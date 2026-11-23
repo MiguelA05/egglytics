@@ -9,6 +9,7 @@ import com.egglytics.data.repository.FirebaseExpenseAndWithdrawalRepository
 import com.egglytics.data.repository.FirebaseExpenseCategoryRepository
 import com.egglytics.data.repository.FirebaseFeedRepository
 import com.egglytics.data.repository.FirebaseHarvestRepository
+import com.egglytics.data.repository.FirebaseOpeningAndCountRepository
 import com.egglytics.data.repository.FirebasePaymentMethodRepository
 import com.egglytics.data.repository.FirebasePriceRepository
 import com.egglytics.data.repository.FirebaseRemoteSubmissionVerifier
@@ -16,6 +17,7 @@ import com.egglytics.data.repository.FirebaseReversalRepository
 import com.egglytics.data.repository.FirebaseSaleRepository
 import com.egglytics.data.repository.FirebaseSessionRepository
 import com.egglytics.data.repository.HarvestRepository
+import com.egglytics.data.repository.OpeningAndCountRepository
 import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.PriceRepository
 import com.egglytics.data.repository.RemoteSubmissionVerifier
@@ -163,6 +165,12 @@ abstract class RepositoryModule {
     abstract fun bindExpenseAndWithdrawalRepository(
         impl: FirebaseExpenseAndWithdrawalRepository,
     ): ExpenseAndWithdrawalRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindOpeningAndCountRepository(
+        impl: FirebaseOpeningAndCountRepository,
+    ): OpeningAndCountRepository
 
     @Binds
     @Singleton

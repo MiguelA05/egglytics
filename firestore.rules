@@ -260,6 +260,41 @@ service cloud.firestore {
           && request.resource.data.methodId is string
           && request.resource.data.methodId.size() > 0;
       }
+
+      match /openingBalances/{id} {
+        allow read: if isActive(b);
+        allow create: if isAdmin(b) && validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'kind', 'key', 'quantity'])
+          && request.resource.data.kind in ['eggs', 'feed', 'cash', 'customerDebt']
+          && request.resource.data.key is string
+          && request.resource.data.key.size() > 0
+          && request.resource.data.quantity is int
+          && request.resource.data.quantity >= 0;
+      }
+
+      match /counts/{id} {
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'kind', 'items', 'isClosing'])
+          && request.resource.data.kind in ['eggs', 'feed', 'cash']
+          && request.resource.data.items is map
+          && request.resource.data.items.size() > 0
+          && request.resource.data.isClosing is bool;
+      }
+
+      match /closings/{id} {
+        allow read: if isActive(b);
+        allow create: if validMovement(b)
+          && request.resource.data.keys().hasOnly([
+               'fechaOperativa', 'createdAt', 'syncedAt', 'createdBy', 'note',
+               'summary', 'countIds'])
+          && request.resource.data.summary is map
+          && request.resource.data.countIds is list;
+      }
     }
   }
 }

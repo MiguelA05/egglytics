@@ -28,6 +28,7 @@ enum class AppDestination {
     FEED,
     EXPENSES,
     CASH,
+    COUNTS,
 }
 
 data class SessionUiState(

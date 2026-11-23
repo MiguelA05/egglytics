@@ -21,12 +21,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.ui.components.SyncStatusBadge
+import com.egglytics.ui.components.VoidReasonDialog
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -42,9 +49,23 @@ fun ExpensesScreen(
     onDescriptionChange: (String) -> Unit,
     onNoteChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onVoidMovement: (ReversalTargetCollection, String, String) -> Unit = { _, _, _ -> },
 ) {
     val categoryNames = state.categories.associate { it.id to it.name }
     val methodNames = state.paymentMethods.associate { it.id to it.name }
+    var pendingVoid by remember { mutableStateOf<Triple<ReversalTargetCollection, String, String>?>(null) }
+
+    pendingVoid?.let { (targetCollection, targetId, description) ->
+        VoidReasonDialog(
+            title = "Anular movimiento",
+            description = description,
+            onDismiss = { pendingVoid = null },
+            onConfirm = { reason ->
+                onVoidMovement(targetCollection, targetId, reason)
+                pendingVoid = null
+            },
+        )
+    }
 
     Scaffold { innerPadding ->
         LazyColumn(
@@ -195,6 +216,7 @@ fun ExpensesScreen(
             items(state.expenses, key = { "exp_${it.expense.id}" }) { item ->
                 val catName = categoryNames[item.expense.categoryId] ?: item.expense.categoryId
                 val methodName = methodNames[item.expense.methodId] ?: item.expense.methodId
+                val revReason = state.reversedReasons["${ReversalTargetCollection.EXPENSES.firestoreValue}_${item.expense.id}"]
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
@@ -211,6 +233,23 @@ fun ExpensesScreen(
                                 "${item.expense.amount} $currency · $methodName",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (revReason != null) {
+                                Text(
+                                    "Anulado · Motivo: $revReason",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else if (state.isAdmin) {
+                                TextButton(
+                                    onClick = {
+                                        pendingVoid = Triple(
+                                            ReversalTargetCollection.EXPENSES,
+                                            item.expense.id,
+                                            "Gasto $catName (${item.expense.amount} $currency)",
+                                        )
+                                    },
+                                ) { Text("Anular") }
+                            }
                         }
                         SyncStatusBadge(isPendingWrite = item.isPendingWrite)
                     }
@@ -219,6 +258,7 @@ fun ExpensesScreen(
 
             items(state.withdrawals, key = { "w_${it.withdrawal.id}" }) { item ->
                 val methodName = methodNames[item.withdrawal.methodId] ?: item.withdrawal.methodId
+                val revReason = state.reversedReasons["${ReversalTargetCollection.WITHDRAWALS.firestoreValue}_${item.withdrawal.id}"]
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
@@ -235,6 +275,23 @@ fun ExpensesScreen(
                                 "${item.withdrawal.amount} $currency · $methodName",
                                 style = MaterialTheme.typography.bodySmall,
                             )
+                            if (revReason != null) {
+                                Text(
+                                    "Anulado · Motivo: $revReason",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            } else if (state.isAdmin) {
+                                TextButton(
+                                    onClick = {
+                                        pendingVoid = Triple(
+                                            ReversalTargetCollection.WITHDRAWALS,
+                                            item.withdrawal.id,
+                                            "Retiro personal (${item.withdrawal.amount} $currency)",
+                                        )
+                                    },
+                                ) { Text("Anular") }
+                            }
                         }
                         SyncStatusBadge(isPendingWrite = item.isPendingWrite)
                     }

@@ -1,6 +1,7 @@
 package com.egglytics.ui
 
 import com.egglytics.data.model.Business
+import com.egglytics.data.repository.CountSubmitRequest
 import com.egglytics.data.repository.FeedDepletionRequest
 import com.egglytics.data.repository.FeedLossRequest
 import com.egglytics.data.repository.FeedPurchaseRequest
@@ -9,9 +10,12 @@ import com.egglytics.data.repository.ObservedFeedDepletion
 import com.egglytics.data.repository.ObservedFeedLoss
 import com.egglytics.data.repository.ObservedFeedPurchase
 import com.egglytics.data.repository.ObservedReversal
+import com.egglytics.data.repository.OpeningAndCountRepository
+import com.egglytics.data.repository.OpeningEntryInput
 import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SessionState
+import com.egglytics.domain.model.DailyClosing
 import com.egglytics.domain.model.FeedDepletion
 import com.egglytics.domain.model.FeedIngredient
 import com.egglytics.domain.model.FeedLoss
@@ -19,9 +23,11 @@ import com.egglytics.domain.model.FeedPurchase
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Member
 import com.egglytics.domain.model.MemberRole
+import com.egglytics.domain.model.OpeningBalance
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentMethod
+import com.egglytics.domain.model.PhysicalCount
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.usecase.GetFeedBalanceUseCase
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +92,7 @@ class FeedViewModelTest {
         val vm = FeedViewModel(
             feedRepo,
             FakePaymentMethodRepository(),
+            FakeOpeningAndCountRepository(),
             FakeReversalRepository(),
             GetFeedBalanceUseCase(),
             fixedClock,
@@ -122,6 +129,28 @@ class FeedViewModelTest {
         assertEquals(75L, vm.uiState.value.summaries[FeedIngredient.CONCENTRATE]?.balanceKg)
 
         job.cancel()
+    }
+
+    private class FakeOpeningAndCountRepository : OpeningAndCountRepository {
+        private val openings = MutableStateFlow<List<OpeningBalance>>(emptyList())
+        private val counts = MutableStateFlow<List<PhysicalCount>>(emptyList())
+        private val closings = MutableStateFlow<List<DailyClosing>>(emptyList())
+        override fun observeOpenings(): Flow<List<OpeningBalance>> = openings
+        override fun observeCounts(): Flow<List<PhysicalCount>> = counts
+        override fun observeClosings(): Flow<List<DailyClosing>> = closings
+        override fun recordOpenings(
+            fechaOperativa: LocalDate,
+            businessStartDate: LocalDate,
+            entries: List<OpeningEntryInput>,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
+
+        override fun recordCountOrClosing(
+            request: CountSubmitRequest,
+            onSuccess: (List<String>) -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
     }
 
     private class FakePaymentMethodRepository : PaymentMethodRepository {

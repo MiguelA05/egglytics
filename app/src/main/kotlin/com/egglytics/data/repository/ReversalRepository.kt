@@ -3,6 +3,7 @@ package com.egglytics.data.repository
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.Reversal
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -31,4 +32,13 @@ interface ReversalRepository {
         onSuccess: () -> Unit,
         onError: (String) -> Unit,
     )
+
+    fun reverseMovement(
+        targetCollection: ReversalTargetCollection,
+        targetId: String,
+        businessStartDate: LocalDate,
+        reason: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit,
+    ) = Unit
 }

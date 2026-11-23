@@ -10,6 +10,7 @@ import com.egglytics.data.repository.ObservedFeedDepletion
 import com.egglytics.data.repository.ObservedFeedLoss
 import com.egglytics.data.repository.ObservedFeedPurchase
 import com.egglytics.data.repository.ObservedReversal
+import com.egglytics.data.repository.OpeningAndCountRepository
 import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SessionState
@@ -17,8 +18,12 @@ import com.egglytics.domain.model.FeedIngredient
 import com.egglytics.domain.model.FeedLossType
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.KG_PER_FEED_BAG
+import com.egglytics.domain.model.MemberRole
+import com.egglytics.domain.model.OpeningBalance
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.PaymentMethod
+import com.egglytics.domain.model.PhysicalCount
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.usecase.FeedIngredientSummary
 import com.egglytics.domain.usecase.FeedSummaryRequest
 import com.egglytics.domain.usecase.GetFeedBalanceUseCase
@@ -64,11 +69,13 @@ data class FeedFormState(
 
 data class FeedUiState(
     val form: FeedFormState = FeedFormState(),
+    val isAdmin: Boolean = false,
     val paymentMethods: List<PaymentMethod> = emptyList(),
     val summaries: Map<FeedIngredient, FeedIngredientSummary> = emptyMap(),
     val purchases: List<ObservedFeedPurchase> = emptyList(),
     val depletions: List<ObservedFeedDepletion> = emptyList(),
     val losses: List<ObservedFeedLoss> = emptyList(),
+    val reversedReasons: Map<String, String> = emptyMap(),
     val feedError: String? = null,
 )
 
@@ -77,12 +84,14 @@ data class FeedUiState(
 class FeedViewModel @Inject constructor(
     private val feedRepository: FeedRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
+    private val openingAndCountRepository: OpeningAndCountRepository,
     private val reversalRepository: ReversalRepository,
     private val getFeedBalanceUseCase: GetFeedBalanceUseCase,
     private val clock: Clock,
 ) : ViewModel() {
 
     private val activeUid = MutableStateFlow<String?>(null)
+    private val isAdminFlow = MutableStateFlow(false)
     private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
     private val writeError = MutableStateFlow<String?>(null)
 
@@ -124,6 +133,22 @@ class FeedViewModel @Inject constructor(
         }
     }
 
+    private val observedOpenings = activeUid.flatMapLatest { uid ->
+        if (uid == null) {
+            flowOf(emptyList<OpeningBalance>())
+        } else {
+            openingAndCountRepository.observeOpenings().catch { emit(emptyList()) }
+        }
+    }
+
+    private val observedCounts = activeUid.flatMapLatest { uid ->
+        if (uid == null) {
+            flowOf(emptyList<PhysicalCount>())
+        } else {
+            openingAndCountRepository.observeCounts().catch { emit(emptyList()) }
+        }
+    }
+
     private val observedReversals = activeUid.flatMapLatest { uid ->
         if (uid == null) {
             flowOf(emptyList<ObservedReversal>())
@@ -132,19 +157,33 @@ class FeedViewModel @Inject constructor(
         }
     }
 
-    private val catalogAndReversals = combine(
-        observedMethods,
-        observedReversals,
-        writeError,
-    ) { methods, reversals, wErr -> Triple(methods, reversals, wErr) }
-
-    val uiState: StateFlow<FeedUiState> = combine(
-        formState,
+    private val movementsBundle = combine(
         observedPurchases,
         observedDepletions,
         observedLosses,
+    ) { purchases, depletions, losses -> Triple(purchases, depletions, losses) }
+
+    private val openingsCountsReversals = combine(
+        observedOpenings,
+        observedCounts,
+        observedReversals,
+    ) { openings, counts, reversals -> Triple(openings, counts, reversals) }
+
+    private val catalogAndReversals = combine(
+        observedMethods,
+        isAdminFlow,
+        writeError,
+    ) { methods, isAdmin, wErr -> Triple(methods, isAdmin, wErr) }
+
+    val uiState: StateFlow<FeedUiState> = combine(
+        formState,
+        movementsBundle,
+        openingsCountsReversals,
         catalogAndReversals,
-    ) { form, (purchases, pErr), (depletions, dErr), (losses, lErr), (methods, reversals, wErr) ->
+    ) { form, (purchasesRes, depletionsRes, lossesRes), (openings, counts, reversals), (methods, isAdmin, wErr) ->
+        val (purchases, pErr) = purchasesRes
+        val (depletions, dErr) = depletionsRes
+        val (losses, lErr) = lossesRes
         val today = OperationalDate.today(clock)
         val periodStart = runCatching { OperationalDate.parse(form.periodStartInput.trim()) }
             .getOrDefault(today.minusDays(13L))
@@ -154,23 +193,31 @@ class FeedViewModel @Inject constructor(
             form.selectedMethodId != null && methods.any { it.id == form.selectedMethodId } -> form.selectedMethodId
             else -> methods.firstOrNull()?.id
         }
+        val reversalModels = reversals.map { it.reversal }
         val summaries = getFeedBalanceUseCase(
             FeedSummaryRequest(
+                openings = openings,
+                counts = counts,
                 purchases = purchases.map { it.purchase },
                 depletions = depletions.map { it.depletion },
                 losses = losses.map { it.loss },
-                reversals = reversals.map { it.reversal },
+                reversals = reversalModels,
                 periodStart = periodStart,
                 periodEnd = periodEnd,
             ),
         )
+        val reversedReasons = reversalModels.associate {
+            "${it.targetCollection.firestoreValue}_${it.targetId}" to it.reason
+        }
         FeedUiState(
             form = form.copy(selectedMethodId = effectiveMethodId),
+            isAdmin = isAdmin,
             paymentMethods = methods,
             summaries = summaries,
             purchases = purchases,
             depletions = depletions,
             losses = losses,
+            reversedReasons = reversedReasons,
             feedError = listOfNotNull(wErr, pErr, dErr, lErr).firstOrNull(),
         )
     }.stateIn(
@@ -180,7 +227,9 @@ class FeedViewModel @Inject constructor(
     )
 
     fun syncSession(session: SessionState) {
-        val nextUid = (session as? SessionState.Authenticated)?.uid
+        val auth = session as? SessionState.Authenticated
+        val nextUid = auth?.uid
+        isAdminFlow.value = auth?.member?.role == MemberRole.ADMIN
         if (activeUid.value != nextUid) {
             activeUid.value = nextUid
             writeError.value = null
@@ -188,6 +237,23 @@ class FeedViewModel @Inject constructor(
                 formState.value = initialFormState(OperationalDate.today(clock))
             }
         }
+    }
+
+    fun voidFeedMovement(
+        session: SessionState,
+        targetCollection: ReversalTargetCollection,
+        targetId: String,
+        reason: String,
+    ) {
+        val auth = session as? SessionState.Authenticated ?: return
+        reversalRepository.reverseMovement(
+            targetCollection = targetCollection,
+            targetId = targetId,
+            businessStartDate = auth.business.startDate,
+            reason = reason,
+            onSuccess = { writeError.value = null },
+            onError = { err -> writeError.value = err },
+        )
     }
 
     fun onModeChange(mode: FeedFormMode) {

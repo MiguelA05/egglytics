@@ -153,6 +153,43 @@ class FirebaseReversalRepository @Inject constructor(
             }
     }
 
+    override fun reverseMovement(
+        targetCollection: ReversalTargetCollection,
+        targetId: String,
+        businessStartDate: LocalDate,
+        reason: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        val uid = auth.currentUser?.uid ?: return onError("No hay usuario autenticado.")
+        val trimmedReason = reason.trim()
+        if (trimmedReason.isEmpty()) return onError("El motivo de anulación es obligatorio.")
+
+        val today = OperationalDate.today(clock)
+        Harvest.validateOperationalDate(today, businessStartDate)
+        val now = Instant.now(clock)
+        val reversalId = "rev_${targetCollection.firestoreValue}_$targetId"
+        val payload = reversalPayload(
+            fechaOperativa = today,
+            createdAt = now,
+            createdBy = uid,
+            targetCollection = targetCollection,
+            targetId = targetId,
+            reason = trimmedReason,
+        )
+
+        firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("reversals")
+            .document(reversalId)
+            .set(payload)
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener { ex ->
+                onError(ex.localizedMessage ?: "No se pudo anular el movimiento.")
+            }
+    }
+
     private fun reversalPayload(
         fechaOperativa: LocalDate,
         createdAt: Instant,
