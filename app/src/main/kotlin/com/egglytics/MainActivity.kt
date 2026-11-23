@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
                                     homeState = homeUi,
                                     onOpenHarvests = { sessionViewModel.navigateTo(AppDestination.HARVESTS) },
                                     onOpenSales = { sessionViewModel.navigateTo(AppDestination.SALES) },
+                                    onRetryReconcile = homeViewModel::retryReconcile,
+                                    onDismissSyncNotice = homeViewModel::dismissSyncNotice,
                                     onSignOut = sessionViewModel::signOut,
                                 )
                             }

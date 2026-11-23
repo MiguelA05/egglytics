@@ -5,10 +5,17 @@ import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
 import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedSale
+import com.egglytics.data.repository.RemoteSubmissionVerifier
+import com.egglytics.data.repository.RemoteVerificationOutcome
 import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SaleWithPaymentRequest
 import com.egglytics.data.repository.SessionState
+import com.egglytics.data.repository.SubmissionKind
+import com.egglytics.data.repository.SubmissionReceipt
+import com.egglytics.data.repository.SubmissionReceiptStore
+import com.egglytics.data.repository.SubmissionReconciler
+import com.egglytics.data.repository.SubmissionSyncStatus
 import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Harvest
@@ -135,7 +142,17 @@ class HomeViewModelTest {
             ),
         )
 
-        val vm = HomeViewModel(harvestRepo, saleRepo, FakeReversalRepository(), GetDailySummaryUseCase(), fixedClock)
+        val receiptStore = FakeSubmissionReceiptStore()
+        val reconciler = SubmissionReconciler(receiptStore) { RemoteVerificationOutcome.Confirmed }
+        val vm = HomeViewModel(
+            harvestRepo,
+            saleRepo,
+            FakeReversalRepository(),
+            receiptStore,
+            reconciler,
+            GetDailySummaryUseCase(),
+            fixedClock,
+        )
         val job = launch { vm.uiState.collect {} }
         vm.syncSession(authenticated)
         advanceUntilIdle()
@@ -198,10 +215,14 @@ class HomeViewModelTest {
             override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) = Unit
         }
 
+        val receiptStore = FakeSubmissionReceiptStore()
+        val reconciler = SubmissionReconciler(receiptStore) { RemoteVerificationOutcome.Confirmed }
         val vm = HomeViewModel(
             harvestRepo,
             failingPaymentsSaleRepo,
             FakeReversalRepository(),
+            receiptStore,
+            reconciler,
             GetDailySummaryUseCase(),
             fixedClock,
         )
@@ -216,6 +237,51 @@ class HomeViewModelTest {
         assertEquals(false, state.salesIncomplete)
         assertEquals(true, state.paymentsIncomplete)
         assertEquals("Fallo en pagos", state.summaryError)
+
+        job.cancel()
+    }
+
+    @Test
+    fun `reconciles rejected receipt on reopen into syncNotices and allows dismissing it`() = runTest {
+        val receiptStore = FakeSubmissionReceiptStore()
+        receiptStore.upsert(
+            SubmissionReceipt(
+                submissionId = "s_rej",
+                uid = "op_1",
+                businessId = "egglytics_default",
+                kind = SubmissionKind.SALE_WITH_PAYMENT,
+                primaryDocId = "s_rej",
+                secondaryDocId = "p_rej",
+                fechaOperativa = today,
+                summaryText = "Venta 2026-11-21 · AA 2 cubetas (37000)",
+                createdAtEpochMs = now.toEpochMilli(),
+                status = SubmissionSyncStatus.PENDING,
+            ),
+        )
+        val reconciler = SubmissionReconciler(
+            receiptStore,
+            RemoteSubmissionVerifier { RemoteVerificationOutcome.RejectedAfterSync("Rechazado por reglas") },
+        )
+        val vm = HomeViewModel(
+            FakeHarvestRepository(emptyList()),
+            FakeSaleRepository(emptyList(), emptyMap()),
+            FakeReversalRepository(),
+            receiptStore,
+            reconciler,
+            GetDailySummaryUseCase(),
+            fixedClock,
+        )
+        val job = launch { vm.uiState.collect {} }
+        vm.syncSession(authenticated)
+        advanceUntilIdle()
+
+        assertEquals(1, vm.uiState.value.syncNotices.size)
+        assertEquals(SubmissionSyncStatus.REJECTED, vm.uiState.value.syncNotices.first().status)
+        assertEquals("Rechazado por reglas", vm.uiState.value.syncNotices.first().statusDetail)
+
+        vm.dismissSyncNotice("s_rej")
+        advanceUntilIdle()
+        assertEquals(0, vm.uiState.value.syncNotices.size)
 
         job.cancel()
     }
@@ -272,5 +338,49 @@ class HomeViewModelTest {
             onSuccess: () -> Unit,
             onError: (String) -> Unit,
         ) = Unit
+    }
+
+    private class FakeSubmissionReceiptStore : SubmissionReceiptStore {
+        private val flow = MutableStateFlow<List<SubmissionReceipt>>(emptyList())
+
+        override fun observeReceipts(uid: String, businessId: String): Flow<List<SubmissionReceipt>> =
+            MutableStateFlow(emptyList<SubmissionReceipt>()).let {
+                kotlinx.coroutines.flow.flow {
+                    flow.collect { list ->
+                        emit(list.filter { it.uid == uid && it.businessId == businessId })
+                    }
+                }
+            }
+
+        override fun getReceipts(uid: String, businessId: String): List<SubmissionReceipt> =
+            flow.value.filter { it.uid == uid && it.businessId == businessId }
+
+        override fun upsert(receipt: SubmissionReceipt) {
+            flow.value = flow.value.filterNot {
+                it.uid == receipt.uid && it.businessId == receipt.businessId && it.submissionId == receipt.submissionId
+            } + receipt
+        }
+
+        override fun updateStatus(
+            uid: String,
+            businessId: String,
+            submissionId: String,
+            status: SubmissionSyncStatus,
+            statusDetail: String?,
+        ) {
+            flow.value = flow.value.map {
+                if (it.uid == uid && it.businessId == businessId && it.submissionId == submissionId) {
+                    it.copy(status = status, statusDetail = statusDetail)
+                } else {
+                    it
+                }
+            }
+        }
+
+        override fun remove(uid: String, businessId: String, submissionId: String) {
+            flow.value = flow.value.filterNot {
+                it.uid == uid && it.businessId == businessId && it.submissionId == submissionId
+            }
+        }
     }
 }

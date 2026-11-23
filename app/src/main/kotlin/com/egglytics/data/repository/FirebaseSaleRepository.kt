@@ -28,6 +28,7 @@ class FirebaseSaleRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val clock: Clock,
+    private val receiptStore: SubmissionReceiptStore,
 ) : SaleRepository {
 
     override fun observeSales(): Flow<List<ObservedSale>> = callbackFlow {
@@ -195,13 +196,47 @@ class FirebaseSaleRepository @Inject constructor(
             paymentPayload["note"] = payment.note.orEmpty()
         }
 
+        val summaryText = "Venta $fechaStr · ${request.classification.name} " +
+            "${request.buckets} cubetas (${sale.total})"
+        receiptStore.upsert(
+            SubmissionReceipt(
+                submissionId = sale.id,
+                uid = uid,
+                businessId = BuildConfig.BUSINESS_ID,
+                kind = SubmissionKind.SALE_WITH_PAYMENT,
+                primaryDocId = sale.id,
+                secondaryDocId = payment.id,
+                fechaOperativa = sale.fechaOperativa,
+                summaryText = summaryText,
+                createdAtEpochMs = now.toEpochMilli(),
+                status = SubmissionSyncStatus.PENDING,
+            ),
+        )
+
         val businessRef = firestore.collection("businesses").document(BuildConfig.BUSINESS_ID)
         val batch = firestore.batch()
         batch.set(businessRef.collection("sales").document(sale.id), salePayload)
         batch.set(businessRef.collection("payments").document(payment.id), paymentPayload)
         batch.commit()
+            .addOnSuccessListener {
+                receiptStore.updateStatus(
+                    uid = uid,
+                    businessId = BuildConfig.BUSINESS_ID,
+                    submissionId = sale.id,
+                    status = SubmissionSyncStatus.CONFIRMED,
+                    statusDetail = null,
+                )
+            }
             .addOnFailureListener { ex ->
-                onWriteError(ex.localizedMessage ?: "No se pudo guardar la venta con su pago.")
+                val message = ex.localizedMessage ?: "No se pudo guardar la venta con su pago."
+                receiptStore.updateStatus(
+                    uid = uid,
+                    businessId = BuildConfig.BUSINESS_ID,
+                    submissionId = sale.id,
+                    status = SubmissionSyncStatus.REJECTED,
+                    statusDetail = message,
+                )
+                onWriteError(message)
             }
     }
 

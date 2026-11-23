@@ -20,6 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.egglytics.data.repository.SessionState
+import com.egglytics.data.repository.SubmissionKind
+import com.egglytics.data.repository.SubmissionReceipt
+import com.egglytics.data.repository.SubmissionSyncStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.ActivePriceResult
@@ -31,6 +34,8 @@ fun HomeScreen(
     homeState: HomeUiState,
     onOpenHarvests: () -> Unit,
     onOpenSales: () -> Unit,
+    onRetryReconcile: () -> Unit,
+    onDismissSyncNotice: (String) -> Unit,
     onSignOut: () -> Unit,
 ) {
     Scaffold { innerPadding ->
@@ -161,6 +166,31 @@ fun HomeScreen(
                 }
             }
 
+            if (homeState.syncNotices.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Avisos de sincronización (${homeState.syncNotices.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                items(homeState.syncNotices, key = { it.submissionId }) { notice ->
+                    SyncNoticeCard(
+                        notice = notice,
+                        isReconciling = homeState.isReconciling,
+                        onOpenDestination = {
+                            when (notice.kind) {
+                                SubmissionKind.HARVEST -> onOpenHarvests()
+                                SubmissionKind.SALE_WITH_PAYMENT -> onOpenSales()
+                            }
+                        },
+                        onRetryReconcile = onRetryReconcile,
+                        onDismiss = { onDismissSyncNotice(notice.submissionId) },
+                    )
+                }
+            }
+
             item {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -221,5 +251,89 @@ private fun SummaryRow(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+@Composable
+private fun SyncNoticeCard(
+    notice: SubmissionReceipt,
+    isReconciling: Boolean,
+    onOpenDestination: () -> Unit,
+    onRetryReconcile: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val kindLabel = when (notice.kind) {
+        SubmissionKind.HARVEST -> "Recolección"
+        SubmissionKind.SALE_WITH_PAYMENT -> "Venta + pago"
+    }
+    val statusLabel = when (notice.status) {
+        SubmissionSyncStatus.REJECTED -> "Rechazado al sincronizar"
+        SubmissionSyncStatus.UNCONFIRMED -> "Sin confirmar en servidor"
+        SubmissionSyncStatus.PENDING -> "Pendiente de sincronización"
+        SubmissionSyncStatus.CONFIRMED -> "Confirmado"
+    }
+    val destinationLabel = when (notice.kind) {
+        SubmissionKind.HARVEST -> "Ir a Recolección"
+        SubmissionKind.SALE_WITH_PAYMENT -> "Ir a Ventas"
+    }
+    val idsLabel = if (notice.secondaryDocId != null) {
+        "ID: ${notice.primaryDocId} · Pago: ${notice.secondaryDocId}"
+    } else {
+        "ID: ${notice.primaryDocId}"
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "$statusLabel · $kindLabel",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = notice.summaryText,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = idsLabel,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (!notice.statusDetail.isNullOrBlank()) {
+                Text(
+                    text = notice.statusDetail.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onOpenDestination,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(destinationLabel)
+                }
+                if (notice.status == SubmissionSyncStatus.UNCONFIRMED) {
+                    OutlinedButton(
+                        onClick = onRetryReconcile,
+                        enabled = !isReconciling,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (isReconciling) "Verificando..." else "Reverificar")
+                    }
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Descartar")
+                }
+            }
+        }
     }
 }

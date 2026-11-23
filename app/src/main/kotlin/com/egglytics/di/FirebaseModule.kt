@@ -5,15 +5,20 @@ import com.egglytics.BuildConfig
 import com.egglytics.data.repository.FirebaseHarvestRepository
 import com.egglytics.data.repository.FirebasePaymentMethodRepository
 import com.egglytics.data.repository.FirebasePriceRepository
+import com.egglytics.data.repository.FirebaseRemoteSubmissionVerifier
 import com.egglytics.data.repository.FirebaseReversalRepository
 import com.egglytics.data.repository.FirebaseSaleRepository
 import com.egglytics.data.repository.FirebaseSessionRepository
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.PriceRepository
+import com.egglytics.data.repository.RemoteSubmissionVerifier
 import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
+import com.egglytics.data.repository.SharedPreferencesSubmissionReceiptStore
+import com.egglytics.data.repository.SubmissionReceiptStore
+import com.egglytics.data.repository.SubmissionReconciler
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.GetActivePriceUseCase
 import com.egglytics.domain.usecase.GetDailySummaryUseCase
@@ -106,6 +111,13 @@ object FirebaseModule {
 
     @Provides
     fun provideValidateSaleReversalUseCase(): ValidateSaleReversalUseCase = ValidateSaleReversalUseCase()
+
+    @Provides
+    @Singleton
+    fun provideSubmissionReconciler(
+        store: SubmissionReceiptStore,
+        verifier: RemoteSubmissionVerifier,
+    ): SubmissionReconciler = SubmissionReconciler(store, verifier)
 }
 
 @Module
@@ -135,4 +147,16 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindReversalRepository(impl: FirebaseReversalRepository): ReversalRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSubmissionReceiptStore(
+        impl: SharedPreferencesSubmissionReceiptStore,
+    ): SubmissionReceiptStore
+
+    @Binds
+    @Singleton
+    abstract fun bindRemoteSubmissionVerifier(
+        impl: FirebaseRemoteSubmissionVerifier,
+    ): RemoteSubmissionVerifier
 }

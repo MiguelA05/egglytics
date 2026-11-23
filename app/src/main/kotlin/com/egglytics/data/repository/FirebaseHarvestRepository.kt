@@ -24,6 +24,7 @@ class FirebaseHarvestRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
     private val clock: Clock,
+    private val receiptStore: SubmissionReceiptStore,
 ) : HarvestRepository {
 
     override fun observeHarvests(): Flow<List<ObservedHarvest>> = callbackFlow {
@@ -84,14 +85,48 @@ class FirebaseHarvestRepository @Inject constructor(
             payload["note"] = trimmedNote
         }
 
+        val totalGraded = graded.values.sum()
+        val summaryText = "Recolección ${OperationalDate.format(fechaOperativa)} · " +
+            "$totalGraded aptos, $discarded descartados"
+        receiptStore.upsert(
+            SubmissionReceipt(
+                submissionId = harvestId,
+                uid = uid,
+                businessId = BuildConfig.BUSINESS_ID,
+                kind = SubmissionKind.HARVEST,
+                primaryDocId = harvestId,
+                fechaOperativa = fechaOperativa,
+                summaryText = summaryText,
+                createdAtEpochMs = now.toEpochMilli(),
+                status = SubmissionSyncStatus.PENDING,
+            ),
+        )
+
         firestore
             .collection("businesses")
             .document(BuildConfig.BUSINESS_ID)
             .collection("harvests")
             .document(harvestId)
             .set(payload)
+            .addOnSuccessListener {
+                receiptStore.updateStatus(
+                    uid = uid,
+                    businessId = BuildConfig.BUSINESS_ID,
+                    submissionId = harvestId,
+                    status = SubmissionSyncStatus.CONFIRMED,
+                    statusDetail = null,
+                )
+            }
             .addOnFailureListener { ex ->
-                onWriteError(ex.localizedMessage ?: "No se pudo sincronizar la recolección.")
+                val message = ex.localizedMessage ?: "No se pudo sincronizar la recolección."
+                receiptStore.updateStatus(
+                    uid = uid,
+                    businessId = BuildConfig.BUSINESS_ID,
+                    submissionId = harvestId,
+                    status = SubmissionSyncStatus.REJECTED,
+                    statusDetail = message,
+                )
+                onWriteError(message)
             }
     }
 }
