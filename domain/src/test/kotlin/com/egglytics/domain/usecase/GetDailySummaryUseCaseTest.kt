@@ -5,6 +5,8 @@ import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentType
+import com.egglytics.domain.model.Reversal
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SaleLine
 import org.junit.Assert.assertEquals
@@ -172,6 +174,52 @@ class GetDailySummaryUseCaseTest {
 
         assertEquals(37000L, summary.totalSold)
         assertEquals(37000L, summary.totalCollected)
+        assertEquals(0L, summary.pendingDeliveryBuckets)
+    }
+
+    @Test
+    fun `excludes reversed harvest, sale and payment from daily summary`() {
+        val harvest = Harvest(
+            id = "h_rev",
+            fechaOperativa = today,
+            createdAt = now,
+            createdBy = "op_1",
+            graded = mapOf(EggClassification.AA to 120L),
+            discarded = 5L,
+        )
+        val pendingSale = Sale(
+            id = "s_rev",
+            fechaOperativa = today,
+            createdAt = now,
+            createdBy = "op_1",
+            lines = listOf(SaleLine.create(EggClassification.AA, buckets = 2L, listPrice = 18500L)),
+            total = 37000L,
+            deliveryStatus = DeliveryStatus.PENDING,
+        )
+        val payment = Payment(
+            id = "p_rev",
+            fechaOperativa = today,
+            createdAt = now,
+            createdBy = "op_1",
+            saleId = "s_rev",
+            amount = 37000L,
+            methodId = "cash",
+            type = PaymentType.PAYMENT,
+        )
+        val reversals = listOf(
+            ReversalTargetCollection.HARVESTS to "h_rev",
+            ReversalTargetCollection.PAYMENTS to "p_rev",
+            ReversalTargetCollection.SALES to "s_rev",
+        ).map { (coll, targetId) ->
+            Reversal("rev_$targetId", today, now, "admin_1", coll, targetId, "Err")
+        }
+
+        val summary = useCase(today, listOf(harvest), listOf(pendingSale), listOf(payment), reversals)
+
+        assertEquals(0L, summary.gradedEggs)
+        assertEquals(0L, summary.discardedEggs)
+        assertEquals(0L, summary.totalSold)
+        assertEquals(0L, summary.totalCollected)
         assertEquals(0L, summary.pendingDeliveryBuckets)
     }
 }

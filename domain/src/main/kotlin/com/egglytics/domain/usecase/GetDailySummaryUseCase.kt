@@ -4,6 +4,8 @@ import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentType
+import com.egglytics.domain.model.Reversal
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import java.time.LocalDate
 
@@ -22,11 +24,28 @@ class GetDailySummaryUseCase {
         harvests: List<Harvest>,
         sales: List<Sale>,
         payments: List<Payment>,
+        reversals: List<Reversal> = emptyList(),
     ): DailySummary {
+        val reversedHarvestIds = reversals
+            .asSequence()
+            .filter { it.targetCollection == ReversalTargetCollection.HARVESTS }
+            .map { it.targetId }
+            .toSet()
+        val reversedSaleIds = reversals
+            .asSequence()
+            .filter { it.targetCollection == ReversalTargetCollection.SALES }
+            .map { it.targetId }
+            .toSet()
+        val reversedPaymentIds = reversals
+            .asSequence()
+            .filter { it.targetCollection == ReversalTargetCollection.PAYMENTS }
+            .map { it.targetId }
+            .toSet()
+
         var gradedEggs = 0L
         var discardedEggs = 0L
         harvests.forEach { harvest ->
-            if (harvest.fechaOperativa == operationalDate) {
+            if (harvest.id !in reversedHarvestIds && harvest.fechaOperativa == operationalDate) {
                 gradedEggs += harvest.graded.values.sum()
                 discardedEggs += harvest.discarded
             }
@@ -35,17 +54,23 @@ class GetDailySummaryUseCase {
         var totalSold = 0L
         var pendingDeliveryBuckets = 0L
         sales.forEach { sale ->
-            if (sale.fechaOperativa == operationalDate) {
-                totalSold += sale.total
-            }
-            if (sale.deliveryStatus == DeliveryStatus.PENDING) {
-                pendingDeliveryBuckets += sale.lines.sumOf { it.buckets }
+            if (sale.id !in reversedSaleIds) {
+                if (sale.fechaOperativa == operationalDate) {
+                    totalSold += sale.total
+                }
+                if (sale.deliveryStatus == DeliveryStatus.PENDING) {
+                    pendingDeliveryBuckets += sale.lines.sumOf { it.buckets }
+                }
             }
         }
 
         val totalCollected = payments
             .asSequence()
-            .filter { it.fechaOperativa == operationalDate && it.type == PaymentType.PAYMENT }
+            .filter {
+                it.id !in reversedPaymentIds &&
+                    it.fechaOperativa == operationalDate &&
+                    it.type == PaymentType.PAYMENT
+            }
             .sumOf { it.amount }
 
         return DailySummary(

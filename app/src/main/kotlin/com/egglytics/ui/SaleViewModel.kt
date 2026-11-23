@@ -2,18 +2,27 @@ package com.egglytics.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedSale
+import com.egglytics.data.repository.ObservedSalePayment
 import com.egglytics.data.repository.PaymentMethodRepository
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SaleWithPaymentRequest
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
+import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentMethod
+import com.egglytics.domain.model.PaymentType
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SingleLineSaleRequest
 import com.egglytics.domain.usecase.ActivePriceResult
+import com.egglytics.domain.usecase.SaleReversalEligibility
+import com.egglytics.domain.usecase.SaleReversalValidationRequest
+import com.egglytics.domain.usecase.ValidateSaleReversalUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +56,10 @@ data class SaleUiState(
     val paymentMethods: List<PaymentMethod> = emptyList(),
     val sales: List<ObservedSale> = emptyList(),
     val paidAmountBySaleId: Map<String, Long> = emptyMap(),
+    val reversedSaleReasons: Map<String, String> = emptyMap(),
+    val saleReversalEligibility: Map<String, SaleReversalEligibility> = emptyMap(),
+    val voidingSaleIds: Set<String> = emptySet(),
+    val canVoid: Boolean = false,
     val salesError: String? = null,
 )
 
@@ -55,13 +68,17 @@ data class SaleUiState(
 class SaleViewModel @Inject constructor(
     private val saleRepository: SaleRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
+    private val reversalRepository: ReversalRepository,
+    private val validateSaleReversalUseCase: ValidateSaleReversalUseCase,
     private val clock: Clock,
 ) : ViewModel() {
 
     private val activeUid = MutableStateFlow<String?>(null)
+    private val isAdmin = MutableStateFlow(false)
     private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
     private val pendingLocalSaleId = MutableStateFlow<String?>(null)
     private val remoteBatchError = MutableStateFlow<String?>(null)
+    private val voidingSaleIds = MutableStateFlow<Set<String>>(emptySet())
 
     private val observedSales = activeUid
         .flatMapLatest { uid ->
@@ -106,32 +123,107 @@ class SaleViewModel @Inject constructor(
     private val observedPayments = activeUid
         .flatMapLatest { uid ->
             if (uid == null) {
-                flowOf(emptyMap<String, List<Payment>>())
+                flowOf(emptyMap<String, List<ObservedSalePayment>>())
             } else {
-                saleRepository.observeSalePayments()
+                saleRepository.observeAllSalePayments()
                     .catch { emit(emptyMap()) }
             }
         }
+
+    private val observedSaleReturnIds = activeUid
+        .flatMapLatest { uid ->
+            if (uid == null) {
+                flowOf(emptyMap<String, List<String>>())
+            } else {
+                saleRepository.observeSaleReturnIdsBySaleId()
+                    .catch { emit(emptyMap()) }
+            }
+        }
+
+    private val observedReversals = activeUid
+        .flatMapLatest { uid ->
+            if (uid == null) {
+                flowOf(Pair(emptyList<ObservedReversal>(), null as String?))
+            } else {
+                reversalRepository.observeReversals()
+                    .map { items -> Pair(items, null as String?) }
+                    .catch { ex ->
+                        emit(Pair(emptyList(), ex.localizedMessage ?: "Error al consultar anulaciones."))
+                    }
+            }
+        }
+
+    private val reversalSignals = combine(
+        observedReversals,
+        observedSaleReturnIds,
+        voidingSaleIds,
+        isAdmin,
+    ) { revRes, returnIdsBySale, voiding, admin ->
+        ReversalSignals(revRes, returnIdsBySale, voiding, admin)
+    }
 
     val uiState: StateFlow<SaleUiState> = combine(
         formState,
         observedSales,
         observedPaymentMethods,
         observedPayments,
-        remoteBatchError,
-    ) { form, salesRes, methodsRes, paymentsBySale, remoteErr ->
+        combine(remoteBatchError, reversalSignals) { err, sig -> err to sig },
+    ) { form, salesRes, methodsRes, paymentsBySale, (remoteErr, signals) ->
         val methods = methodsRes.first
         val effectiveMethodId = when {
             form.selectedMethodId != null && methods.any { it.id == form.selectedMethodId } -> form.selectedMethodId
             else -> methods.firstOrNull()?.id
         }
-        val paidAmounts = paymentsBySale.mapValues { (_, list) -> list.sumOf { it.amount } }
+        val reversals = signals.reversalsResult.first.map { it.reversal }
+        val reversedPaymentIds = reversals
+            .asSequence()
+            .filter { it.targetCollection == ReversalTargetCollection.PAYMENTS }
+            .map { it.targetId }
+            .toSet()
+        val reversedSaleReturnIds = reversals
+            .asSequence()
+            .filter { it.targetCollection == ReversalTargetCollection.SALE_RETURNS }
+            .map { it.targetId }
+            .toSet()
+        val reversedSaleReasons = reversals
+            .asSequence()
+            .filter { it.targetCollection == ReversalTargetCollection.SALES }
+            .associate { it.targetId to it.reason }
+
+        val paidAmounts = paymentsBySale.mapValues { (_, list) ->
+            list.asSequence()
+                .map { it.payment }
+                .filter { it.id !in reversedPaymentIds && it.type == PaymentType.PAYMENT }
+                .sumOf { it.amount }
+        }
+        val eligibilityMap = salesRes.first.associate { observed ->
+            val saleId = observed.sale.id
+            val salePayments = paymentsBySale[saleId].orEmpty()
+            val pendingPaymentIds = salePayments.filter { it.isPendingWrite }.map { it.payment.id }.toSet()
+            val hasActiveReturns = signals.returnIdsBySale[saleId]
+                .orEmpty()
+                .any { it !in reversedSaleReturnIds }
+            saleId to validateSaleReversalUseCase(
+                SaleReversalValidationRequest(
+                    sale = observed.sale,
+                    saleIsPendingWrite = observed.isPendingWrite,
+                    salePayments = salePayments.map { it.payment },
+                    pendingPaymentIds = pendingPaymentIds,
+                    hasActiveReturns = hasActiveReturns,
+                    reversals = reversals,
+                ),
+            )
+        }
         SaleUiState(
             form = form.copy(selectedMethodId = effectiveMethodId),
             paymentMethods = methods,
             sales = salesRes.first,
             paidAmountBySaleId = paidAmounts,
-            salesError = remoteErr ?: salesRes.second ?: methodsRes.second,
+            reversedSaleReasons = reversedSaleReasons,
+            saleReversalEligibility = eligibilityMap,
+            voidingSaleIds = signals.voidingIds,
+            canVoid = signals.isAdmin,
+            salesError = remoteErr ?: salesRes.second ?: methodsRes.second ?: signals.reversalsResult.second,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -140,9 +232,12 @@ class SaleViewModel @Inject constructor(
     )
 
     fun syncSession(session: SessionState) {
-        val nextUid = (session as? SessionState.Authenticated)?.uid
+        val auth = session as? SessionState.Authenticated
+        val nextUid = auth?.uid
+        isAdmin.value = auth?.member?.role == MemberRole.ADMIN
         if (activeUid.value != nextUid) {
             activeUid.value = nextUid
+            voidingSaleIds.value = emptySet()
             if (nextUid == null) {
                 pendingLocalSaleId.value = null
                 formState.value = initialFormState(OperationalDate.today(clock))
@@ -270,6 +365,55 @@ class SaleViewModel @Inject constructor(
             },
         )
     }
+
+    fun voidSale(
+        session: SessionState.Authenticated,
+        observed: ObservedSale,
+        reason: String,
+    ) {
+        if (session.member.role != MemberRole.ADMIN) {
+            remoteBatchError.value = "Solo un administrador puede anular ventas."
+            return
+        }
+        val saleId = observed.sale.id
+        if (saleId in uiState.value.reversedSaleReasons || saleId in voidingSaleIds.value) {
+            return
+        }
+        val eligibility = uiState.value.saleReversalEligibility[saleId]
+        if (eligibility !is SaleReversalEligibility.Allowed) {
+            remoteBatchError.value = (eligibility as? SaleReversalEligibility.Blocked)?.reason
+                ?: "No se puede anular esta venta."
+            return
+        }
+        val trimmedReason = reason.trim()
+        if (trimmedReason.isEmpty()) {
+            remoteBatchError.value = "El motivo de anulación es obligatorio."
+            return
+        }
+
+        remoteBatchError.value = null
+        voidingSaleIds.update { it + saleId }
+        reversalRepository.reverseSaleWithPayment(
+            sale = observed.sale,
+            payment = eligibility.payment,
+            businessStartDate = session.business.startDate,
+            reason = trimmedReason,
+            onSuccess = {
+                voidingSaleIds.update { it - saleId }
+            },
+            onError = { err ->
+                voidingSaleIds.update { it - saleId }
+                remoteBatchError.value = err
+            },
+        )
+    }
+
+    private data class ReversalSignals(
+        val reversalsResult: Pair<List<ObservedReversal>, String?>,
+        val returnIdsBySale: Map<String, List<String>>,
+        val voidingIds: Set<String>,
+        val isAdmin: Boolean,
+    )
 
     private fun initialFormState(today: LocalDate): SaleFormState = SaleFormState(
         saleDateInput = OperationalDate.format(today),

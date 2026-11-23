@@ -19,6 +19,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -26,6 +30,7 @@ import com.egglytics.data.repository.ObservedHarvest
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.ui.components.SyncStatusBadge
+import com.egglytics.ui.components.VoidReasonDialog
 
 @Composable
 fun HarvestScreen(
@@ -36,7 +41,24 @@ fun HarvestScreen(
     onHarvestDateChange: (String) -> Unit,
     onHarvestNoteChange: (String) -> Unit,
     onSubmitHarvest: () -> Unit,
+    onVoidHarvest: (ObservedHarvest, String) -> Unit,
 ) {
+    var harvestToVoid by remember { mutableStateOf<ObservedHarvest?>(null) }
+
+    val pendingTarget = harvestToVoid
+    if (pendingTarget != null) {
+        VoidReasonDialog(
+            title = "Anular recolección",
+            description = "Se registrará un reverso para la recolección del ${
+                OperationalDate.format(pendingTarget.harvest.fechaOperativa)
+            }.",
+            onDismiss = { harvestToVoid = null },
+            onConfirm = { reason ->
+                harvestToVoid = null
+                onVoidHarvest(pendingTarget, reason)
+            },
+        )
+    }
     Scaffold { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -148,7 +170,14 @@ fun HarvestScreen(
                 }
             } else {
                 items(state.harvests, key = { it.harvest.id }) { item ->
-                    HarvestRowCard(item)
+                    val voidReason = state.reversedHarvestReasons[item.harvest.id]
+                    HarvestRowCard(
+                        observed = item,
+                        voidReason = voidReason,
+                        canVoid = state.canVoid && !item.isPendingWrite && voidReason == null,
+                        isVoiding = item.harvest.id in state.voidingHarvestIds,
+                        onVoidClick = { harvestToVoid = item },
+                    )
                 }
             }
         }
@@ -156,7 +185,13 @@ fun HarvestScreen(
 }
 
 @Composable
-private fun HarvestRowCard(observed: ObservedHarvest) {
+private fun HarvestRowCard(
+    observed: ObservedHarvest,
+    voidReason: String?,
+    canVoid: Boolean,
+    isVoiding: Boolean,
+    onVoidClick: () -> Unit,
+) {
     val harvest = observed.harvest
     val summary = EggClassification.entries
         .mapNotNull { cls -> harvest.graded[cls]?.takeIf { it > 0L }?.let { "${cls.name}: $it" } }
@@ -174,8 +209,9 @@ private fun HarvestRowCard(observed: ObservedHarvest) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
+                val dateLabel = OperationalDate.format(harvest.fechaOperativa)
                 Text(
-                    text = OperationalDate.format(harvest.fechaOperativa),
+                    text = if (voidReason != null) "$dateLabel · Anulada" else dateLabel,
                     style = MaterialTheme.typography.titleSmall,
                 )
                 SyncStatusBadge(isPendingWrite = observed.isPendingWrite)
@@ -189,6 +225,21 @@ private fun HarvestRowCard(observed: ObservedHarvest) {
                     text = harvest.note.orEmpty(),
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+            if (voidReason != null) {
+                Text(
+                    text = "Anulada · Motivo: $voidReason",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (canVoid) {
+                OutlinedButton(
+                    onClick = onVoidClick,
+                    enabled = !isVoiding,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (isVoiding) "Anulando..." else "Anular recolección")
+                }
             }
         }
     }

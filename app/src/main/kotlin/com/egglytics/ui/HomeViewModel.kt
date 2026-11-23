@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedSale
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.DeliveryStatus
@@ -40,6 +42,7 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val harvestRepository: HarvestRepository,
     private val saleRepository: SaleRepository,
+    private val reversalRepository: ReversalRepository,
     private val getDailySummaryUseCase: GetDailySummaryUseCase,
     private val clock: Clock,
 ) : ViewModel() {
@@ -85,17 +88,33 @@ class HomeViewModel @Inject constructor(
             }
         }
 
+    private val observedReversals = activeUid
+        .flatMapLatest { uid ->
+            if (uid == null) {
+                flowOf(Pair(emptyList<ObservedReversal>(), null as String?))
+            } else {
+                reversalRepository.observeReversals()
+                    .map { items -> Pair(items, null as String?) }
+                    .catch { ex ->
+                        emit(Pair(emptyList(), ex.localizedMessage ?: "Error al consultar anulaciones."))
+                    }
+            }
+        }
+
     val uiState: StateFlow<HomeUiState> = combine(
         observedHarvests,
         observedSales,
         observedPayments,
-    ) { (harvests, harvestErr), (sales, saleErr), (paymentsBySale, paymentErr) ->
+        observedReversals,
+    ) { (harvests, harvestErr), (sales, saleErr), (paymentsBySale, paymentErr), (reversals, reversalErr) ->
         val today = OperationalDate.today(clock)
+        val activeReversals = reversals.map { it.reversal }
         val summary = getDailySummaryUseCase(
             operationalDate = today,
             harvests = harvests.map { it.harvest },
             sales = sales.map { it.sale },
             payments = paymentsBySale.values.flatten(),
+            reversals = activeReversals,
         )
         val pendingHarvests = harvests.count {
             it.isPendingWrite && it.harvest.fechaOperativa == today
@@ -104,13 +123,16 @@ class HomeViewModel @Inject constructor(
             it.isPendingWrite &&
                 (it.sale.fechaOperativa == today || it.sale.deliveryStatus == DeliveryStatus.PENDING)
         }
+        val reversalsIncomplete = reversalErr != null
         HomeUiState(
             summary = summary,
-            pendingSyncCount = pendingHarvests + pendingSales,
-            harvestsIncomplete = harvestErr != null,
-            salesIncomplete = saleErr != null,
-            paymentsIncomplete = paymentErr != null,
-            summaryError = listOfNotNull(harvestErr, saleErr, paymentErr).distinct().joinToString(" · ")
+            pendingSyncCount = pendingHarvests + pendingSales + reversals.count { it.isPendingWrite },
+            harvestsIncomplete = harvestErr != null || reversalsIncomplete,
+            salesIncomplete = saleErr != null || reversalsIncomplete,
+            paymentsIncomplete = paymentErr != null || reversalsIncomplete,
+            summaryError = listOfNotNull(harvestErr, saleErr, paymentErr, reversalErr)
+                .distinct()
+                .joinToString(" · ")
                 .ifEmpty { null },
         )
     }.stateIn(

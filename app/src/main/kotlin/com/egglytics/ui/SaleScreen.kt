@@ -20,6 +20,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -28,7 +32,9 @@ import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.ActivePriceResult
+import com.egglytics.domain.usecase.SaleReversalEligibility
 import com.egglytics.ui.components.SyncStatusBadge
+import com.egglytics.ui.components.VoidReasonDialog
 
 @Composable
 fun SaleScreen(
@@ -43,9 +49,24 @@ fun SaleScreen(
     onSaleNoteChange: (String) -> Unit,
     onSubmitSale: () -> Unit,
     onMarkSaleDelivered: (String) -> Unit,
+    onVoidSale: (ObservedSale, String) -> Unit,
 ) {
     val activePrice = activePrices[state.form.saleClassification] as? ActivePriceResult.Found
     val parsedBuckets = state.form.saleBucketsInput.trim().toLongOrNull()?.takeIf { it > 0L }
+    var saleToVoid by remember { mutableStateOf<ObservedSale?>(null) }
+
+    val pendingVoidTarget = saleToVoid
+    if (pendingVoidTarget != null) {
+        VoidReasonDialog(
+            title = "Anular venta",
+            description = "Se anularán la venta y su cobro completo en un único lote de reversos.",
+            onDismiss = { saleToVoid = null },
+            onConfirm = { reason ->
+                saleToVoid = null
+                onVoidSale(pendingVoidTarget, reason)
+            },
+        )
+    }
 
     Scaffold { innerPadding ->
         LazyColumn(
@@ -197,11 +218,17 @@ fun SaleScreen(
                 }
             } else {
                 items(state.sales, key = { it.sale.id }) { item ->
+                    val voidReason = state.reversedSaleReasons[item.sale.id]
                     SaleRowCard(
                         observed = item,
                         paidAmount = state.paidAmountBySaleId[item.sale.id] ?: 0L,
                         currency = currency,
+                        voidReason = voidReason,
+                        canVoid = state.canVoid && voidReason == null,
+                        eligibility = state.saleReversalEligibility[item.sale.id],
+                        isVoiding = item.sale.id in state.voidingSaleIds,
                         onMarkDelivered = { onMarkSaleDelivered(item.sale.id) },
+                        onVoidClick = { saleToVoid = item },
                     )
                 }
             }
@@ -214,18 +241,24 @@ private fun SaleRowCard(
     observed: ObservedSale,
     paidAmount: Long,
     currency: String,
+    voidReason: String?,
+    canVoid: Boolean,
+    eligibility: SaleReversalEligibility?,
+    isVoiding: Boolean,
     onMarkDelivered: () -> Unit,
+    onVoidClick: () -> Unit,
 ) {
     val sale = observed.sale
     val line = sale.lines.first()
-    val deliveryText = when (sale.deliveryStatus) {
-        DeliveryStatus.PENDING -> "Pendiente entrega"
-        DeliveryStatus.DELIVERED -> "Entregada"
+    val deliveryText = when {
+        voidReason != null -> "Anulada"
+        sale.deliveryStatus == DeliveryStatus.PENDING -> "Pendiente entrega"
+        else -> "Entregada"
     }
-    val paymentText = if (paidAmount > 0L) {
-        "Pagado: $paidAmount $currency"
-    } else {
-        "Sin pago registrado"
+    val paymentText = when {
+        voidReason != null -> "Cobro anulado"
+        paidAmount > 0L -> "Pagado: $paidAmount $currency"
+        else -> "Sin pago registrado"
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -259,12 +292,50 @@ private fun SaleRowCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            if (sale.deliveryStatus == DeliveryStatus.PENDING) {
-                OutlinedButton(
-                    onClick = onMarkDelivered,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Marcar entregada")
+            if (voidReason != null) {
+                Text(
+                    text = "Anulada · Motivo: $voidReason",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                if (sale.deliveryStatus == DeliveryStatus.PENDING) {
+                    OutlinedButton(
+                        onClick = onMarkDelivered,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Marcar entregada")
+                    }
+                }
+                if (canVoid) {
+                    when (eligibility) {
+                        is SaleReversalEligibility.Allowed -> {
+                            OutlinedButton(
+                                onClick = onVoidClick,
+                                enabled = !isVoiding,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(if (isVoiding) "Anulando..." else "Anular venta")
+                            }
+                        }
+
+                        is SaleReversalEligibility.Blocked -> {
+                            OutlinedButton(
+                                onClick = {},
+                                enabled = false,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Anular venta (bloqueado)")
+                            }
+                            Text(
+                                text = eligibility.reason,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+
+                        null -> Unit
+                    }
                 }
             }
         }

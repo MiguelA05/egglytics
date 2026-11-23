@@ -3,7 +3,9 @@ package com.egglytics.ui
 import com.egglytics.data.model.Business
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedSale
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SaleWithPaymentRequest
 import com.egglytics.data.repository.SessionState
@@ -133,7 +135,7 @@ class HomeViewModelTest {
             ),
         )
 
-        val vm = HomeViewModel(harvestRepo, saleRepo, GetDailySummaryUseCase(), fixedClock)
+        val vm = HomeViewModel(harvestRepo, saleRepo, FakeReversalRepository(), GetDailySummaryUseCase(), fixedClock)
         val job = launch { vm.uiState.collect {} }
         vm.syncSession(authenticated)
         advanceUntilIdle()
@@ -196,7 +198,13 @@ class HomeViewModelTest {
             override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) = Unit
         }
 
-        val vm = HomeViewModel(harvestRepo, failingPaymentsSaleRepo, GetDailySummaryUseCase(), fixedClock)
+        val vm = HomeViewModel(
+            harvestRepo,
+            failingPaymentsSaleRepo,
+            FakeReversalRepository(),
+            GetDailySummaryUseCase(),
+            fixedClock,
+        )
         val job = launch { vm.uiState.collect {} }
         vm.syncSession(authenticated)
         advanceUntilIdle()
@@ -241,5 +249,28 @@ class HomeViewModelTest {
         ) = Unit
 
         override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) = Unit
+    }
+
+    private class FakeReversalRepository(
+        initial: List<ObservedReversal> = emptyList(),
+    ) : ReversalRepository {
+        private val flow = MutableStateFlow(initial)
+        override fun observeReversals(): Flow<List<ObservedReversal>> = flow
+        override fun reverseHarvest(
+            harvest: Harvest,
+            businessStartDate: LocalDate,
+            reason: String,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
+
+        override fun reverseSaleWithPayment(
+            sale: Sale,
+            payment: Payment,
+            businessStartDate: LocalDate,
+            reason: String,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
     }
 }

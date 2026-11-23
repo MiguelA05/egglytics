@@ -4,10 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedReversal
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Harvest
+import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.ReversalTargetCollection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +40,9 @@ data class HarvestFormState(
 data class HarvestUiState(
     val form: HarvestFormState = HarvestFormState(),
     val harvests: List<ObservedHarvest> = emptyList(),
+    val reversedHarvestReasons: Map<String, String> = emptyMap(),
+    val voidingHarvestIds: Set<String> = emptySet(),
+    val canVoid: Boolean = false,
     val harvestsError: String? = null,
 )
 
@@ -43,11 +50,15 @@ data class HarvestUiState(
 @HiltViewModel
 class HarvestViewModel @Inject constructor(
     private val harvestRepository: HarvestRepository,
+    private val reversalRepository: ReversalRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
     private val activeUid = MutableStateFlow<String?>(null)
+    private val isAdmin = MutableStateFlow(false)
     private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
+    private val voidingIds = MutableStateFlow<Set<String>>(emptySet())
+    private val voidError = MutableStateFlow<String?>(null)
 
     private val observedHarvests = activeUid
         .flatMapLatest { uid ->
@@ -62,11 +73,37 @@ class HarvestViewModel @Inject constructor(
             }
         }
 
-    val uiState: StateFlow<HarvestUiState> = combine(formState, observedHarvests) { form, (items, err) ->
+    private val observedReversals = activeUid
+        .flatMapLatest { uid ->
+            if (uid == null) {
+                flowOf(Pair(emptyList<ObservedReversal>(), null as String?))
+            } else {
+                reversalRepository.observeReversals()
+                    .map { items -> Pair(items, null as String?) }
+                    .catch { ex ->
+                        emit(Pair(emptyList(), ex.localizedMessage ?: "Error al consultar anulaciones."))
+                    }
+            }
+        }
+
+    val uiState: StateFlow<HarvestUiState> = combine(
+        formState,
+        observedHarvests,
+        observedReversals,
+        voidingIds,
+        combine(isAdmin, voidError) { admin, err -> admin to err },
+    ) { form, (items, err), (reversals, revErr), voiding, (admin, vErr) ->
+        val reversedMap = reversals
+            .asSequence()
+            .filter { it.reversal.targetCollection == ReversalTargetCollection.HARVESTS }
+            .associate { it.reversal.targetId to it.reversal.reason }
         HarvestUiState(
             form = form,
             harvests = items,
-            harvestsError = err,
+            reversedHarvestReasons = reversedMap,
+            voidingHarvestIds = voiding,
+            canVoid = admin,
+            harvestsError = listOfNotNull(vErr, err, revErr).firstOrNull(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -75,9 +112,13 @@ class HarvestViewModel @Inject constructor(
     )
 
     fun syncSession(session: SessionState) {
-        val nextUid = (session as? SessionState.Authenticated)?.uid
+        val auth = session as? SessionState.Authenticated
+        val nextUid = auth?.uid
+        isAdmin.value = auth?.member?.role == MemberRole.ADMIN
         if (activeUid.value != nextUid) {
             activeUid.value = nextUid
+            voidingIds.value = emptySet()
+            voidError.value = null
             if (nextUid == null) {
                 formState.value = initialFormState(OperationalDate.today(clock))
             }
@@ -172,6 +213,45 @@ class HarvestViewModel @Inject constructor(
                 harvestError = null,
             )
         }
+    }
+
+    fun voidHarvest(
+        session: SessionState.Authenticated,
+        observed: ObservedHarvest,
+        reason: String,
+    ) {
+        if (session.member.role != MemberRole.ADMIN) {
+            voidError.value = "Solo un administrador puede anular recolecciones."
+            return
+        }
+        if (observed.isPendingWrite) {
+            voidError.value = "Espera a que la recolección se confirme antes de anularla."
+            return
+        }
+        val harvestId = observed.harvest.id
+        if (harvestId in uiState.value.reversedHarvestReasons || harvestId in voidingIds.value) {
+            return
+        }
+        val trimmedReason = reason.trim()
+        if (trimmedReason.isEmpty()) {
+            voidError.value = "El motivo de anulación es obligatorio."
+            return
+        }
+
+        voidError.value = null
+        voidingIds.update { it + harvestId }
+        reversalRepository.reverseHarvest(
+            harvest = observed.harvest,
+            businessStartDate = session.business.startDate,
+            reason = trimmedReason,
+            onSuccess = {
+                voidingIds.update { it - harvestId }
+            },
+            onError = { err ->
+                voidingIds.update { it - harvestId }
+                voidError.value = err
+            },
+        )
     }
 
     private fun initialFormState(today: LocalDate): HarvestFormState = HarvestFormState(

@@ -5,16 +5,19 @@ import com.egglytics.BuildConfig
 import com.egglytics.data.repository.FirebaseHarvestRepository
 import com.egglytics.data.repository.FirebasePaymentMethodRepository
 import com.egglytics.data.repository.FirebasePriceRepository
+import com.egglytics.data.repository.FirebaseReversalRepository
 import com.egglytics.data.repository.FirebaseSaleRepository
 import com.egglytics.data.repository.FirebaseSessionRepository
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.PaymentMethodRepository
 import com.egglytics.data.repository.PriceRepository
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SessionRepository
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.GetActivePriceUseCase
 import com.egglytics.domain.usecase.GetDailySummaryUseCase
+import com.egglytics.domain.usecase.ValidateSaleReversalUseCase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
@@ -100,6 +103,9 @@ object FirebaseModule {
 
     @Provides
     fun provideGetDailySummaryUseCase(): GetDailySummaryUseCase = GetDailySummaryUseCase()
+
+    @Provides
+    fun provideValidateSaleReversalUseCase(): ValidateSaleReversalUseCase = ValidateSaleReversalUseCase()
 }
 
 @Module
@@ -125,4 +131,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindPaymentMethodRepository(impl: FirebasePaymentMethodRepository): PaymentMethodRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindReversalRepository(impl: FirebaseReversalRepository): ReversalRepository
 }

@@ -3,12 +3,16 @@ package com.egglytics.ui
 import com.egglytics.data.model.Business
 import com.egglytics.data.repository.HarvestRepository
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.ObservedReversal
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Member
 import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.Payment
+import com.egglytics.domain.model.Sale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
@@ -73,7 +77,7 @@ class HarvestViewModelTest {
     @Test
     fun `submitHarvest validates quantities, records harvest and clears on signOut`() = runTest {
         val repo = FakeHarvestRepository()
-        val vm = HarvestViewModel(repo, fixedClock)
+        val vm = HarvestViewModel(repo, FakeReversalRepository(), fixedClock)
         vm.syncSession(authSession)
         val collectJob = launch { vm.uiState.collect {} }
         advanceUntilIdle()
@@ -106,7 +110,7 @@ class HarvestViewModelTest {
     @Test
     fun `repeated screen navigation does not accumulate active listeners`() = runTest {
         val repo = FakeHarvestRepository()
-        val vm = HarvestViewModel(repo, fixedClock)
+        val vm = HarvestViewModel(repo, FakeReversalRepository(), fixedClock)
         vm.syncSession(authSession)
 
         repeat(3) {
@@ -161,5 +165,26 @@ class HarvestViewModelTest {
                 if (it.harvest.id == harvestId) it.copy(isPendingWrite = false) else it
             }
         }
+    }
+
+    private class FakeReversalRepository : ReversalRepository {
+        private val flow = MutableStateFlow<List<ObservedReversal>>(emptyList())
+        override fun observeReversals(): Flow<List<ObservedReversal>> = flow
+        override fun reverseHarvest(
+            harvest: Harvest,
+            businessStartDate: LocalDate,
+            reason: String,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
+
+        override fun reverseSaleWithPayment(
+            sale: Sale,
+            payment: Payment,
+            businessStartDate: LocalDate,
+            reason: String,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
     }
 }

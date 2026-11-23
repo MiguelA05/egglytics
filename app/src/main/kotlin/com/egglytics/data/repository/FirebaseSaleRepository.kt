@@ -75,6 +75,55 @@ class FirebaseSaleRepository @Inject constructor(
         awaitClose { registration.remove() }
     }
 
+    override fun observeAllSalePayments(): Flow<Map<String, List<ObservedSalePayment>>> = callbackFlow {
+        val registration = firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("payments")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val grouped = snapshot.documents
+                        .mapNotNull { doc ->
+                            val payment = doc.toAnySalePaymentOrNull() ?: return@mapNotNull null
+                            ObservedSalePayment(
+                                payment = payment,
+                                isPendingWrite = doc.metadata.hasPendingWrites(),
+                            )
+                        }
+                        .groupBy { it.payment.saleId.orEmpty() }
+                    trySend(grouped)
+                }
+            }
+        awaitClose { registration.remove() }
+    }
+
+    override fun observeSaleReturnIdsBySaleId(): Flow<Map<String, List<String>>> = callbackFlow {
+        val registration = firestore
+            .collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("saleReturns")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val grouped = snapshot.documents
+                        .mapNotNull { doc ->
+                            val saleId = doc.getString("saleId") ?: return@mapNotNull null
+                            saleId to doc.id
+                        }
+                        .groupBy({ it.first }, { it.second })
+                    trySend(grouped)
+                }
+            }
+        awaitClose { registration.remove() }
+    }
+
     override fun createPendingSaleWithFullPayment(
         request: SaleWithPaymentRequest,
         onWriteError: (String) -> Unit,
@@ -235,10 +284,15 @@ private fun DocumentSnapshot.toSaleOrNull(): Sale? {
 }
 
 private fun DocumentSnapshot.toSalePaymentOrNull(): Payment? {
+    val payment = toAnySalePaymentOrNull() ?: return null
+    return payment.takeIf { it.type == PaymentType.PAYMENT }
+}
+
+private fun DocumentSnapshot.toAnySalePaymentOrNull(): Payment? {
     if (!exists()) return null
     val saleId = getString("saleId") ?: return null
     val typeRaw = getString("type") ?: return null
-    if (typeRaw != PaymentType.PAYMENT.code) return null
+    val type = runCatching { PaymentType.fromCode(typeRaw) }.getOrNull() ?: return null
     val fechaRaw = getString("fechaOperativa") ?: return null
     val fechaOperativa = runCatching { OperationalDate.parse(fechaRaw) }.getOrNull() ?: return null
     val amount = getLong("amount") ?: return null
@@ -255,7 +309,9 @@ private fun DocumentSnapshot.toSalePaymentOrNull(): Payment? {
             saleId = saleId,
             amount = amount,
             methodId = methodId,
-            type = PaymentType.PAYMENT,
+            type = type,
+            saleReturnId = getString("saleReturnId"),
+            reason = getString("reason"),
             note = getString("note"),
         )
     }.getOrNull()

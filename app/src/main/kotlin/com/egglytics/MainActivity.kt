@@ -80,6 +80,9 @@ class MainActivity : ComponentActivity() {
                                     onHarvestDateChange = harvestViewModel::onHarvestDateChange,
                                     onHarvestNoteChange = harvestViewModel::onHarvestNoteChange,
                                     onSubmitHarvest = { harvestViewModel.submitHarvest(session) },
+                                    onVoidHarvest = { item, reason ->
+                                        harvestViewModel.voidHarvest(session, item, reason)
+                                    },
                                 )
                             }
 
@@ -99,6 +102,9 @@ class MainActivity : ComponentActivity() {
                                         saleViewModel.submitSale(session, sessionUi.activePrices)
                                     },
                                     onMarkSaleDelivered = saleViewModel::markSaleDelivered,
+                                    onVoidSale = { item, reason ->
+                                        saleViewModel.voidSale(session, item, reason)
+                                    },
                                 )
                             }
                         }

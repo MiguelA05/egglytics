@@ -1,22 +1,28 @@
 package com.egglytics.ui
 
 import com.egglytics.data.model.Business
+import com.egglytics.data.repository.ObservedReversal
 import com.egglytics.data.repository.ObservedSale
 import com.egglytics.data.repository.PaymentMethodRepository
+import com.egglytics.data.repository.ReversalRepository
 import com.egglytics.data.repository.SaleRepository
 import com.egglytics.data.repository.SaleWithPaymentRequest
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
+import com.egglytics.domain.model.Harvest
 import com.egglytics.domain.model.Member
 import com.egglytics.domain.model.MemberRole
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentMethod
 import com.egglytics.domain.model.Price
+import com.egglytics.domain.model.Reversal
+import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SingleLineSaleRequest
 import com.egglytics.domain.usecase.ActivePriceResult
+import com.egglytics.domain.usecase.ValidateSaleReversalUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
@@ -94,7 +100,13 @@ class SaleViewModelTest {
     fun `local enqueue unlocks form while offline pending, prevents double-tap, and delivers`() = runTest {
         val repo = FakeSaleRepository(emitLocallyImmediately = false)
         val methodRepo = FakePaymentMethodRepository(listOf(cashMethod, nequiMethod))
-        val vm = SaleViewModel(repo, methodRepo, fixedClock)
+        val vm = SaleViewModel(
+            repo,
+            methodRepo,
+            FakeReversalRepository(),
+            ValidateSaleReversalUseCase(),
+            fixedClock,
+        )
         vm.syncSession(authSession)
         val collectJob = launch { vm.uiState.collect {} }
         advanceUntilIdle()
@@ -146,7 +158,13 @@ class SaleViewModelTest {
     fun `remote rejection of previous batch shows error without overwriting current form edits`() = runTest {
         val repo = FakeSaleRepository(emitLocallyImmediately = true)
         val methodRepo = FakePaymentMethodRepository(listOf(cashMethod))
-        val vm = SaleViewModel(repo, methodRepo, fixedClock)
+        val vm = SaleViewModel(
+            repo,
+            methodRepo,
+            FakeReversalRepository(),
+            ValidateSaleReversalUseCase(),
+            fixedClock,
+        )
         vm.syncSession(authSession)
         val collectJob = launch { vm.uiState.collect {} }
         advanceUntilIdle()
@@ -175,7 +193,13 @@ class SaleViewModelTest {
     fun `repeated screen navigation does not accumulate active listeners`() = runTest {
         val repo = FakeSaleRepository()
         val methodRepo = FakePaymentMethodRepository(listOf(cashMethod))
-        val vm = SaleViewModel(repo, methodRepo, fixedClock)
+        val vm = SaleViewModel(
+            repo,
+            methodRepo,
+            FakeReversalRepository(),
+            ValidateSaleReversalUseCase(),
+            fixedClock,
+        )
         vm.syncSession(authSession)
 
         repeat(3) {
@@ -186,6 +210,57 @@ class SaleViewModelTest {
             advanceUntilIdle()
             assertEquals(0, repo.activeListeners)
         }
+    }
+
+    @Test
+    fun `only admin can void confirmed sale with full payment and failed batch leaves no partial reversal`() = runTest {
+        val repo = FakeSaleRepository()
+        val methodRepo = FakePaymentMethodRepository(listOf(cashMethod))
+        val reversalRepo = FakeReversalRepository()
+        val vm = SaleViewModel(
+            repo,
+            methodRepo,
+            reversalRepo,
+            ValidateSaleReversalUseCase(),
+            fixedClock,
+        )
+        val adminSession = authSession.copy(
+            uid = "admin_1",
+            member = authSession.member.copy(uid = "admin_1", role = MemberRole.ADMIN),
+        )
+        vm.syncSession(adminSession)
+        val job = launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val activePrices = mapOf<EggClassification, ActivePriceResult>(
+            EggClassification.AA to ActivePriceResult.Found(activeAaPrice),
+        )
+        vm.onSaleBucketsChange("2")
+        vm.submitSale(adminSession, activePrices, saleId = "s_void", paymentId = "p_void")
+        repo.markConfirmed("s_void")
+        advanceUntilIdle()
+
+        val observedSale = vm.uiState.value.sales.first()
+        reversalRepo.shouldFailNextBatch = true
+        vm.voidSale(adminSession, observedSale, "Cliente canceló")
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.reversedSaleReasons.isEmpty())
+        assertEquals("Fallo de lote", vm.uiState.value.salesError)
+
+        reversalRepo.shouldFailNextBatch = false
+        vm.voidSale(adminSession, observedSale, "Cliente canceló")
+        advanceUntilIdle()
+
+        assertEquals("Cliente canceló", vm.uiState.value.reversedSaleReasons["s_void"])
+        assertEquals(0L, vm.uiState.value.paidAmountBySaleId["s_void"])
+
+        // Operator cannot void
+        vm.syncSession(authSession)
+        advanceUntilIdle()
+        assertEquals(false, vm.uiState.value.canVoid)
+
+        job.cancel()
     }
 
     private class FakePaymentMethodRepository(initial: List<PaymentMethod>) : PaymentMethodRepository {
@@ -252,6 +327,12 @@ class SaleViewModelTest {
             errorHandlers[saleId]?.invoke(message)
         }
 
+        fun markConfirmed(saleId: String) {
+            salesFlow.value = salesFlow.value.map {
+                if (it.sale.id == saleId) it.copy(isPendingWrite = false) else it
+            }
+        }
+
         override fun markDelivered(saleId: String, onWriteError: (String) -> Unit) {
             salesFlow.value = salesFlow.value.map { observed ->
                 if (observed.sale.id == saleId) {
@@ -267,6 +348,60 @@ class SaleViewModelTest {
                     observed
                 }
             }
+        }
+    }
+
+    private class FakeReversalRepository : ReversalRepository {
+        private val flow = MutableStateFlow<List<ObservedReversal>>(emptyList())
+        var shouldFailNextBatch = false
+
+        override fun observeReversals(): Flow<List<ObservedReversal>> = flow
+
+        override fun reverseHarvest(
+            harvest: Harvest,
+            businessStartDate: LocalDate,
+            reason: String,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) = Unit
+
+        override fun reverseSaleWithPayment(
+            sale: Sale,
+            payment: Payment,
+            businessStartDate: LocalDate,
+            reason: String,
+            onSuccess: () -> Unit,
+            onError: (String) -> Unit,
+        ) {
+            if (shouldFailNextBatch) {
+                onError("Fallo de lote")
+                return
+            }
+            val now = Instant.parse("2026-11-21T16:00:00Z")
+            val today = LocalDate.of(2026, 11, 21)
+            val revPayment = Reversal(
+                id = Reversal.paymentReversalId(payment.id),
+                fechaOperativa = today,
+                createdAt = now,
+                createdBy = "admin_1",
+                targetCollection = ReversalTargetCollection.PAYMENTS,
+                targetId = payment.id,
+                reason = reason,
+            )
+            val revSale = Reversal(
+                id = Reversal.saleReversalId(sale.id),
+                fechaOperativa = today,
+                createdAt = now,
+                createdBy = "admin_1",
+                targetCollection = ReversalTargetCollection.SALES,
+                targetId = sale.id,
+                reason = reason,
+            )
+            flow.value = listOf(
+                ObservedReversal(revSale, isPendingWrite = false),
+                ObservedReversal(revPayment, isPendingWrite = false),
+            ) + flow.value
+            onSuccess()
         }
     }
 }
