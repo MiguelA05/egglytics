@@ -3,7 +3,7 @@ package com.egglytics.data.repository
 sealed interface RemoteVerificationOutcome {
     data object Confirmed : RemoteVerificationOutcome
     data object StillPendingLocally : RemoteVerificationOutcome
-    data class RejectedAfterSync(val reason: String) : RemoteVerificationOutcome
+    data class ExplicitFailure(val reason: String) : RemoteVerificationOutcome
     data class Unconfirmed(val detail: String) : RemoteVerificationOutcome
 }
 
@@ -37,7 +37,7 @@ class SubmissionReconciler(
                     statusDetail = "Pendiente de sincronización con el servidor.",
                 )
 
-                is RemoteVerificationOutcome.RejectedAfterSync -> store.updateStatus(
+                is RemoteVerificationOutcome.ExplicitFailure -> store.updateStatus(
                     uid = uid,
                     businessId = businessId,
                     submissionId = receipt.submissionId,

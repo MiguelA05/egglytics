@@ -40,18 +40,37 @@ class SubmissionReconcilerTest {
         assertEquals(SubmissionSyncStatus.PENDING, store.getReceipts("op_1", "egglytics_default").single().status)
 
         val rejectedReconciler = SubmissionReconciler(store) {
-            RemoteVerificationOutcome.RejectedAfterSync("Rechazado tras drenar cola")
+            RemoteVerificationOutcome.ExplicitFailure("PERMISSION_DENIED explícito")
         }
         rejectedReconciler.reconcile("op_1", "egglytics_default")
         val afterReject = store.getReceipts("op_1", "egglytics_default").single()
         assertEquals(SubmissionSyncStatus.REJECTED, afterReject.status)
-        assertEquals("Rechazado tras drenar cola", afterReject.statusDetail)
+        assertEquals("PERMISSION_DENIED explícito", afterReject.statusDetail)
 
         // Confirmed receipt is not overwritten by subsequent reconciles
         val store2 = InMemoryReceiptStore().apply { upsert(receipt.copy(submissionId = "s_2", primaryDocId = "s_2")) }
         val confirmedReconciler = SubmissionReconciler(store2) { RemoteVerificationOutcome.Confirmed }
         confirmedReconciler.reconcile("op_1", "egglytics_default")
         assertEquals(SubmissionSyncStatus.CONFIRMED, store2.getReceipts("op_1", "egglytics_default").single().status)
+    }
+
+    @Test
+    fun `missing server docs after process kill before enqueue or unrecoverable reject stay unconfirmed with detail`() = runTest {
+        val store = InMemoryReceiptStore().apply { upsert(receipt) }
+
+        val indeterminateReconciler = SubmissionReconciler(store) {
+            RemoteVerificationOutcome.Unconfirmed(
+                "Faltan en el servidor la venta (s_1) y su pago (p_1). Resultado indeterminado tras reiniciar.",
+            )
+        }
+        indeterminateReconciler.reconcile("op_1", "egglytics_default")
+
+        val updated = store.getReceipts("op_1", "egglytics_default").single()
+        assertEquals(SubmissionSyncStatus.UNCONFIRMED, updated.status)
+        assertEquals(
+            "Faltan en el servidor la venta (s_1) y su pago (p_1). Resultado indeterminado tras reiniciar.",
+            updated.statusDetail,
+        )
     }
 
     private class InMemoryReceiptStore : SubmissionReceiptStore {

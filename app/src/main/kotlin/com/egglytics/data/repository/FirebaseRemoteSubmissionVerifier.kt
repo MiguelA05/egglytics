@@ -50,31 +50,41 @@ class FirebaseRemoteSubmissionVerifier @Inject constructor(
             }
         }
 
-        val primaryExists = serverPrimary.getOrNull()?.exists() == true
-        val secondaryExists = serverSecondary?.getOrNull()?.exists() ?: true
-        if (primaryExists && secondaryExists) {
+        val primarySnap = serverPrimary.getOrNull()
+        val secondarySnap = serverSecondary?.getOrNull()
+        val primaryConfirmed = primarySnap != null && primarySnap.exists() && !primarySnap.metadata.hasPendingWrites()
+        val secondaryConfirmed = if (secondaryRef == null) {
+            true
+        } else {
+            secondarySnap != null && secondarySnap.exists() && !secondarySnap.metadata.hasPendingWrites()
+        }
+        if (primaryConfirmed && secondaryConfirmed) {
             return RemoteVerificationOutcome.Confirmed
         }
 
         val stillPendingAfterServerCheck = hasLocalPendingWrite(primaryRef) ||
-            (secondaryRef != null && hasLocalPendingWrite(secondaryRef))
+            (secondaryRef != null && hasLocalPendingWrite(secondaryRef)) ||
+            (primarySnap?.metadata?.hasPendingWrites() == true) ||
+            (secondarySnap?.metadata?.hasPendingWrites() == true)
         if (stillPendingAfterServerCheck) {
             return RemoteVerificationOutcome.StillPendingLocally
         }
 
+        val primaryExists = primarySnap?.exists() == true
+        val secondaryExists = secondarySnap?.exists() ?: true
         val missingDetail = when {
             receipt.kind == SubmissionKind.SALE_WITH_PAYMENT && !primaryExists && !secondaryExists ->
-                "Ni la venta ni su pago se confirmaron en el servidor"
+                "Faltan en el servidor la venta (${receipt.primaryDocId}) y su pago (${receipt.secondaryDocId})"
             receipt.kind == SubmissionKind.SALE_WITH_PAYMENT && !primaryExists ->
-                "La venta no se confirmó en el servidor"
+                "Falta en el servidor la venta (${receipt.primaryDocId})"
             receipt.kind == SubmissionKind.SALE_WITH_PAYMENT && !secondaryExists ->
-                "El pago de la venta no se confirmó en el servidor"
-            else -> "La recolección no se confirmó en el servidor"
+                "Falta en el servidor el pago (${receipt.secondaryDocId})"
+            else -> "Falta en el servidor la recolección (${receipt.primaryDocId})"
         }
 
-        return RemoteVerificationOutcome.RejectedAfterSync(
-            "$missingDetail tras completar la cola pendiente (posible rechazo de reglas; " +
-                "el SDK no conserva el motivo exacto tras reiniciar la app).",
+        return RemoteVerificationOutcome.Unconfirmed(
+            "$missingDetail. El envío no pudo confirmarse tras reiniciar " +
+                "(posible rechazo o cierre antes de encolar; el SDK no conserva el motivo).",
         )
     }
 

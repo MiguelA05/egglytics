@@ -260,7 +260,7 @@ class HomeViewModelTest {
         )
         val reconciler = SubmissionReconciler(
             receiptStore,
-            RemoteSubmissionVerifier { RemoteVerificationOutcome.RejectedAfterSync("Rechazado por reglas") },
+            RemoteSubmissionVerifier { RemoteVerificationOutcome.ExplicitFailure("Rechazado por reglas") },
         )
         val vm = HomeViewModel(
             FakeHarvestRepository(emptyList()),
