@@ -22,6 +22,7 @@ import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SingleLineSaleRequest
 import com.egglytics.domain.usecase.ActivePriceResult
+import com.egglytics.domain.usecase.SaleReversalEligibility
 import com.egglytics.domain.usecase.ValidateSaleReversalUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -259,6 +260,49 @@ class SaleViewModelTest {
         vm.syncSession(authSession)
         advanceUntilIdle()
         assertEquals(false, vm.uiState.value.canVoid)
+
+        job.cancel()
+    }
+
+    @Test
+    fun `delivered sale is blocked from voiding without creating reversals`() = runTest {
+        val repo = FakeSaleRepository()
+        val methodRepo = FakePaymentMethodRepository(listOf(cashMethod))
+        val reversalRepo = FakeReversalRepository()
+        val vm = SaleViewModel(
+            repo,
+            methodRepo,
+            reversalRepo,
+            ValidateSaleReversalUseCase(),
+            fixedClock,
+        )
+        val adminSession = authSession.copy(
+            uid = "admin_1",
+            member = authSession.member.copy(uid = "admin_1", role = MemberRole.ADMIN),
+        )
+        vm.syncSession(adminSession)
+        val job = launch { vm.uiState.collect {} }
+        advanceUntilIdle()
+
+        val activePrices = mapOf<EggClassification, ActivePriceResult>(
+            EggClassification.AA to ActivePriceResult.Found(activeAaPrice),
+        )
+        vm.onSaleBucketsChange("2")
+        vm.submitSale(adminSession, activePrices, saleId = "s_deliv", paymentId = "p_deliv")
+        repo.markConfirmed("s_deliv")
+        vm.markSaleDelivered("s_deliv")
+        advanceUntilIdle()
+
+        val observedDelivered = vm.uiState.value.sales.first()
+        val eligibility = vm.uiState.value.saleReversalEligibility["s_deliv"]
+        assertTrue(eligibility is SaleReversalEligibility.Blocked)
+        assertTrue((eligibility as SaleReversalEligibility.Blocked).reason.contains("entregada"))
+
+        vm.voidSale(adminSession, observedDelivered, "Intento inválido")
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.reversedSaleReasons.isEmpty())
+        assertEquals(37000L, vm.uiState.value.paidAmountBySaleId["s_deliv"])
 
         job.cancel()
     }

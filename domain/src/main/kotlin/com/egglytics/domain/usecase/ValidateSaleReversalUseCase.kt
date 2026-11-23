@@ -1,5 +1,6 @@
 package com.egglytics.domain.usecase
 
+import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentType
 import com.egglytics.domain.model.Reversal
@@ -37,6 +38,8 @@ class ValidateSaleReversalUseCase {
         val blockedReason = when {
             request.sale.id in reversedSaleIds -> "La venta ya se encuentra anulada."
             request.saleIsPendingWrite -> "Espera a que la venta termine de sincronizarse."
+            request.sale.deliveryStatus != DeliveryStatus.PENDING ->
+                "No se puede anular una venta ya entregada."
             request.hasActiveReturns -> "No se puede anular: la venta tiene devoluciones registradas."
             activePayments.any { it.type != PaymentType.PAYMENT } ->
                 "No se puede anular: la venta tiene reembolsos registrados."

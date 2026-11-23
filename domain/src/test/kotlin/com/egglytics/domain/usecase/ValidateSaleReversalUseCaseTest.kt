@@ -147,4 +147,27 @@ class ValidateSaleReversalUseCaseTest {
         assertTrue(result is SaleReversalEligibility.Blocked)
         assertTrue((result as SaleReversalEligibility.Blocked).reason.contains("anulada"))
     }
+
+    @Test
+    fun `blocks delivered sale`() {
+        val deliveredSale = baseSale.copy(
+            deliveryStatus = DeliveryStatus.DELIVERED,
+            deliveredAt = now.plusSeconds(60),
+            deliveredBy = "op_1",
+        )
+
+        val result = useCase(
+            SaleReversalValidationRequest(
+                sale = deliveredSale,
+                saleIsPendingWrite = false,
+                salePayments = listOf(fullPayment),
+                pendingPaymentIds = emptySet(),
+                hasActiveReturns = false,
+                reversals = emptyList(),
+            ),
+        )
+
+        assertTrue(result is SaleReversalEligibility.Blocked)
+        assertTrue((result as SaleReversalEligibility.Blocked).reason.contains("entregada"))
+    }
 }
