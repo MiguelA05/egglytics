@@ -35,6 +35,22 @@ class FirebaseOpeningAndCountRepository @Inject constructor(
     override fun observeOpenings(): Flow<List<OpeningBalance>> =
         observeCollection("openingBalances") { it.toOpeningBalanceOrNull() }
 
+    override fun observeHasPendingOpenings(): Flow<Boolean> = callbackFlow {
+        val registration = firestore.collection("businesses")
+            .document(BuildConfig.BUSINESS_ID)
+            .collection("openingBalances")
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    trySend(snapshot.metadata.hasPendingWrites())
+                }
+            }
+        awaitClose { registration.remove() }
+    }
+
     override fun observeCounts(): Flow<List<PhysicalCount>> =
         observeCollection("counts") { it.toPhysicalCountOrNull() }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.egglytics.domain.model.FeedIngredient
+import com.egglytics.domain.model.OperationalDate
 
 @Composable
 fun CountsAndOpeningScreen(
@@ -55,6 +57,12 @@ fun CountsAndOpeningScreen(
                     Text("Conteos y apertura", style = MaterialTheme.typography.headlineSmall)
                     OutlinedButton(onClick = onBack) { Text("Volver") }
                 }
+                val openingBanner = when {
+                    state.hasPendingOpenings -> "Apertura pendiente de confirmación del servidor"
+                    state.openings.isNotEmpty() -> "Apertura confirmada en servidor (${state.openings.size} saldos)"
+                    else -> "Sin apertura confirmada en el servidor"
+                }
+                Text(openingBanner, style = MaterialTheme.typography.bodySmall)
             }
 
             item {
@@ -221,6 +229,67 @@ fun CountsAndOpeningScreen(
                             else -> "Guardar conteo"
                         },
                     )
+                }
+            }
+
+            if (state.closings.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Historial de cierres (${state.closings.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+                val countsById = state.counts.associateBy { it.id }
+                val allExpectedKeys = FeedIngredient.entries.map { it.code } + state.paymentMethods.map { it.id }
+                items(state.closings, key = { "cl_${it.id}" }) { closing ->
+                    val linkedCounts = closing.countIds.mapNotNull { countsById[it] }
+                    val countedKeys = linkedCounts.flatMap { it.items.keys }.toSet()
+                    val omittedKeys = allExpectedKeys.filter { it !in countedKeys }
+                    val s = closing.summary
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "Cierre ${OperationalDate.format(closing.fechaOperativa)}",
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            Text(
+                                text = "Ventas: ${s["salesTotal"] ?: 0L} $currency · Cobros: ${s["collectionsTotal"] ?: 0L} $currency" +
+                                    if ((s["refundsTotal"] ?: 0L) > 0L) " · Reintegros: ${s["refundsTotal"] ?: 0L} $currency" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                text = "Gastos op.: ${s["operatingExpensesTotal"] ?: 0L} $currency · Compras alim.: ${s["feedPurchasesTotal"] ?: 0L} $currency · Retiros: ${s["withdrawalsTotal"] ?: 0L} $currency",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (omittedKeys.isEmpty()) {
+                                Text("Cierre completo (${countedKeys.size} claves contadas)", style = MaterialTheme.typography.bodySmall)
+                            } else {
+                                Text(
+                                    text = "Cierre parcial · Contadas: ${countedKeys.joinToString(", ").ifEmpty { "ninguna" }}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    text = "Omitidas: ${omittedKeys.joinToString(", ")}",
+                                    color = MaterialTheme.colorScheme.tertiary,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            linkedCounts.forEach { count ->
+                                count.items.forEach { (key, item) ->
+                                    val reasonTxt = item.reason?.let { " · Motivo: $it" }.orEmpty()
+                                    Text(
+                                        text = "  $key: contado ${item.physical} / esp. ${item.expected} (dif ${item.difference}$reasonTxt)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -7,6 +7,7 @@ import com.egglytics.domain.model.OpeningBalance
 import com.egglytics.domain.model.OpeningKind
 import com.egglytics.domain.model.PhysicalCount
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import java.time.LocalDate
 
 data class OpeningEntryInput(
@@ -27,6 +28,7 @@ data class CountSubmitRequest(
 
 interface OpeningAndCountRepository {
     fun observeOpenings(): Flow<List<OpeningBalance>>
+    fun observeHasPendingOpenings(): Flow<Boolean> = flowOf(false)
     fun observeCounts(): Flow<List<PhysicalCount>>
     fun observeClosings(): Flow<List<DailyClosing>>
 
