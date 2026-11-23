@@ -7,7 +7,7 @@ import {
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import { readFileSync } from "node:fs";
-import { doc, setDoc, updateDoc, deleteDoc, writeBatch, Timestamp, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch, Timestamp, serverTimestamp } from "firebase/firestore";
 
 const PROJECT_ID = "demo-egglytics-counts-rules";
 const BUSINESS_ID = "egglytics_default";
@@ -131,5 +131,31 @@ describe("OpeningBalances, counts, closings and reversals rules", () => {
         reason: "No permitido",
       }),
     );
+  });
+
+  it("leaves neither counts nor closing when a closing WriteBatch is rejected", async () => {
+    const opDb = testEnv.authenticatedContext(OPERATOR_UID).firestore();
+    const countRef = doc(opDb, `businesses/${BUSINESS_ID}/counts/c_rejected_1`);
+    const closingRef = doc(opDb, `businesses/${BUSINESS_ID}/closings/cl_rejected_1`);
+
+    const batch = writeBatch(opDb);
+    batch.set(countRef, {
+      ...baseMove(OPERATOR_UID),
+      kind: "cash",
+      items: {
+        cash: { expected: 100000, physical: 100000, difference: 0 },
+      },
+      isClosing: true,
+    });
+    batch.set(closingRef, {
+      ...baseMove(OPERATOR_UID),
+      summary: { salesTotal: 50000 },
+      countIds: ["c_rejected_1"],
+      extraDisallowedField: true,
+    });
+
+    await assertFails(batch.commit());
+    assert.equal((await getDoc(countRef)).exists(), false);
+    assert.equal((await getDoc(closingRef)).exists(), false);
   });
 });
