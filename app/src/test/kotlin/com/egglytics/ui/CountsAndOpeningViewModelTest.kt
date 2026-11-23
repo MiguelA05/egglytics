@@ -197,9 +197,9 @@ class CountsAndOpeningViewModelTest {
         advanceUntilIdle()
 
         vm.onIsClosingChange(true)
-        vm.onCashPhysicalChange("cash", "-80000") // reject check? no, physical >= 0; expected cash = 37000 - 80000 - 20000 - 15000 = -78000
         vm.onCashPhysicalChange("cash", "1000")
         vm.onCashReasonChange("cash", "Ajuste apertura")
+        advanceUntilIdle()
         vm.submit(adminSession)
         advanceUntilIdle()
 
@@ -237,6 +237,7 @@ class CountsAndOpeningViewModelTest {
 
         vm.onModeChange(CountsMode.OPENING)
         vm.onCashPhysicalChange("cash", "100000")
+        advanceUntilIdle()
         vm.submit(adminSession)
         advanceUntilIdle()
 
@@ -245,6 +246,7 @@ class CountsAndOpeningViewModelTest {
 
         ocRepo.failNextOpening = false
         vm.onCashPhysicalChange("cash", "120000")
+        advanceUntilIdle()
         vm.submit(adminSession)
         advanceUntilIdle()
 
