@@ -106,9 +106,7 @@ async function seedTestData(
 
 describe("Task 3a-2: Firestore minimal rules (businesses, members, payments, validMovement)", () => {
   before(async () => {
-    const rulesPath = process.env.RULES_FILE
-      ? resolve(process.env.RULES_FILE)
-      : resolve(process.cwd(), "..", "firestore.rules");
+    const rulesPath = resolve(process.cwd(), "..", "firestore.rules");
     const rules = readFileSync(rulesPath, "utf8");
     testEnv = await initializeTestEnvironment({
       projectId: PROJECT_ID,
