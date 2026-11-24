@@ -19,12 +19,38 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.FeedIngredient
 import com.egglytics.domain.model.OperationalDate
+
+@Composable
+internal fun CountsAndOpeningRoute(
+    session: SessionState.Authenticated,
+    countsAndOpeningViewModel: CountsAndOpeningViewModel,
+    onBack: () -> Unit,
+) {
+    val countsUi by countsAndOpeningViewModel.uiState.collectAsStateWithLifecycle()
+    CountsAndOpeningScreen(
+        currency = session.business.currency,
+        state = countsUi,
+        onBack = onBack,
+        onModeChange = countsAndOpeningViewModel::onModeChange,
+        onDateChange = countsAndOpeningViewModel::onDateChange,
+        onFeedPhysicalChange = countsAndOpeningViewModel::onFeedPhysicalChange,
+        onFeedReasonChange = countsAndOpeningViewModel::onFeedReasonChange,
+        onCashPhysicalChange = countsAndOpeningViewModel::onCashPhysicalChange,
+        onCashReasonChange = countsAndOpeningViewModel::onCashReasonChange,
+        onIsClosingChange = countsAndOpeningViewModel::onIsClosingChange,
+        onNoteChange = countsAndOpeningViewModel::onNoteChange,
+        onSubmit = { countsAndOpeningViewModel.submit(session) },
+    )
+}
 
 @Composable
 fun CountsAndOpeningScreen(
@@ -57,6 +83,12 @@ fun CountsAndOpeningScreen(
                     Text("Conteos y apertura", style = MaterialTheme.typography.headlineSmall)
                     OutlinedButton(onClick = onBack) { Text("Volver") }
                 }
+            }
+            if (state.sessionUid == null) {
+                item { Text(state.readError ?: "Cargando saldos…") }
+                return@LazyColumn
+            }
+            item {
                 val openingBanner = when {
                     state.hasPendingOpenings -> "Apertura pendiente de confirmación del servidor"
                     state.openings.isNotEmpty() -> "Apertura confirmada en servidor (${state.openings.size} saldos)"

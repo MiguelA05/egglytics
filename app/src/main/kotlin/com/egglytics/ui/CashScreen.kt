@@ -15,8 +15,27 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.egglytics.data.repository.SessionState
+
+@Composable
+internal fun CashRoute(
+    session: SessionState.Authenticated,
+    cashViewModel: CashViewModel,
+    onBack: () -> Unit,
+) {
+    val cashUi by cashViewModel.uiState.collectAsStateWithLifecycle()
+    CashScreen(
+        currency = session.business.currency,
+        state = cashUi,
+        onBack = onBack,
+        onPeriodStartChange = cashViewModel::onPeriodStartChange,
+        onPeriodEndChange = cashViewModel::onPeriodEndChange,
+    )
+}
 
 @Composable
 fun CashScreen(
@@ -44,6 +63,11 @@ fun CashScreen(
                     Text("Caja y análisis", style = MaterialTheme.typography.headlineSmall)
                     OutlinedButton(onClick = onBack) { Text("Volver") }
                 }
+            }
+
+            state.error?.let { message ->
+                item { Text(message, color = MaterialTheme.colorScheme.error) }
+                return@LazyColumn
             }
 
             if (state.hasPendingSync) {

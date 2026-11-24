@@ -20,16 +20,20 @@ import com.egglytics.domain.model.OpeningBalance
 import com.egglytics.domain.model.OpeningKind
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.PaymentMethod
-import com.egglytics.domain.model.PaymentType
 import com.egglytics.domain.model.PhysicalCount
-import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.usecase.CashAndResultRequest
+import com.egglytics.domain.usecase.ClosingInputs
 import com.egglytics.domain.usecase.FeedSummaryRequest
 import com.egglytics.domain.usecase.GetCashAndResultUseCase
 import com.egglytics.domain.usecase.GetFeedBalanceUseCase
+import com.egglytics.domain.usecase.buildClosingSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.time.Clock
+import java.time.LocalDate
+import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,11 +41,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import java.time.Clock
-import java.time.LocalDate
-import javax.inject.Inject
 
 enum class CountsMode {
     COUNT_OR_CLOSING,
@@ -62,6 +64,9 @@ data class CountsFormState(
 )
 
 data class CountsAndOpeningUiState(
+    val sessionUid: String? = null,
+    val readError: String? = null,
+    val closingInputs: ClosingInputs = ClosingInputs(),
     val form: CountsFormState = CountsFormState(),
     val isAdmin: Boolean = false,
     val hasPendingOpenings: Boolean = false,
@@ -90,124 +95,114 @@ class CountsAndOpeningViewModel @Inject constructor(
     private val activeUid = MutableStateFlow<String?>(null)
     private val isAdmin = MutableStateFlow(false)
     private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
-    private var latestClosingInputs = ClosingInputs()
 
-    private val openingsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else openingAndCountRepository.observeOpenings().catch { emit(emptyList()) }
-    }
-    private val hasPendingOpeningsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(false) else openingAndCountRepository.observeHasPendingOpenings().catch { emit(false) }
-    }
-    private val countsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else openingAndCountRepository.observeCounts().catch { emit(emptyList()) }
-    }
-    private val closingsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else openingAndCountRepository.observeClosings().catch { emit(emptyList()) }
-    }
-    private val methodsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else paymentMethodRepository.observeAllPaymentMethods().catch { emit(emptyList()) }
-    }
-    private val feedPurchasesFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else feedRepository.observePurchases().catch { emit(emptyList()) }
-    }
-    private val feedDepletionsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else feedRepository.observeDepletions().catch { emit(emptyList()) }
-    }
-    private val feedLossesFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else feedRepository.observeLosses().catch { emit(emptyList()) }
-    }
-    private val salesFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else saleRepository.observeSales().catch { emit(emptyList()) }
-    }
-    private val paymentsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyMap()) else saleRepository.observeAllSalePayments().catch { emit(emptyMap()) }
-    }
-    private val expensesFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else expenseAndWithdrawalRepository.observeExpenses().catch { emit(emptyList()) }
-    }
-    private val withdrawalsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else expenseAndWithdrawalRepository.observeWithdrawals().catch { emit(emptyList()) }
-    }
-    private val reversalsFlow = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList()) else reversalRepository.observeReversals().catch { emit(emptyList()) }
-    }
+    val uiState: StateFlow<CountsAndOpeningUiState> = activeUid.flatMapLatest { uid ->
+        val initial = CountsAndOpeningUiState(form = formState.value)
+        if (uid == null) {
+            flowOf(initial)
+        } else {
+            observeCounts(uid)
+                .onStart { emit(initial) }
+                .catch {
+                    emit(initial.copy(readError = "No se pudieron cargar todos los saldos. Vuelve a abrir Conteos para reintentar."))
+                }
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(0L, replayExpirationMillis = 0L),
+        initialValue = CountsAndOpeningUiState(form = initialFormState(OperationalDate.today(clock))),
+    )
 
-    private val feedBundle = combine(feedPurchasesFlow, feedDepletionsFlow, feedLossesFlow) { p, d, l ->
-        Triple(p.map { it.purchase }, d.map { it.depletion }, l.map { it.loss })
-    }
-    private val cashBundle = combine(methodsFlow, salesFlow, paymentsFlow, expensesFlow, withdrawalsFlow) { m, s, p, e, w ->
-        CashBundle(
-            methods = m,
-            sales = s.map { it.sale },
-            payments = p.values.flatten().map { it.payment },
-            expenses = e.map { it.expense },
-            withdrawals = w.map { it.withdrawal },
-        )
-    }
-    private val baseBundle = combine(openingsFlow, hasPendingOpeningsFlow, countsFlow, closingsFlow, reversalsFlow) { o, p, c, cl, r ->
-        BaseBundle(o, p, c, cl, r.map { it.reversal })
-    }
+    private fun observeCounts(uid: String): Flow<CountsAndOpeningUiState> {
+        val openingsFlow = openingAndCountRepository.observeOpenings()
+        val hasPendingOpeningsFlow = openingAndCountRepository.observeHasPendingOpenings()
+        val countsFlow = openingAndCountRepository.observeCounts()
+        val closingsFlow = openingAndCountRepository.observeClosings()
+        val methodsFlow = paymentMethodRepository.observeAllPaymentMethods()
+        val feedPurchasesFlow = feedRepository.observePurchases()
+        val feedDepletionsFlow = feedRepository.observeDepletions()
+        val feedLossesFlow = feedRepository.observeLosses()
+        val salesFlow = saleRepository.observeSales()
+        val paymentsFlow = saleRepository.observeAllSalePayments()
+        val expensesFlow = expenseAndWithdrawalRepository.observeExpenses()
+        val withdrawalsFlow = expenseAndWithdrawalRepository.observeWithdrawals()
+        val reversalsFlow = reversalRepository.observeReversals()
 
-    val uiState: StateFlow<CountsAndOpeningUiState> = combine(
-        formState,
-        isAdmin,
-        baseBundle,
-        feedBundle,
-        cashBundle,
-    ) { form, admin, base, feed, cash ->
-        latestClosingInputs = ClosingInputs(
-            sales = cash.sales,
-            payments = cash.payments,
-            expenses = cash.expenses,
-            feedPurchases = feed.first,
-            withdrawals = cash.withdrawals,
-            reversals = base.reversals,
-        )
-        val today = OperationalDate.today(clock)
-        val feedSummaries = getFeedBalanceUseCase(
-            FeedSummaryRequest(
-                openings = base.openings,
-                counts = base.counts,
-                purchases = feed.first,
-                depletions = feed.second,
-                losses = feed.third,
-                reversals = base.reversals,
-                periodStart = today,
-                periodEnd = today,
-            ),
-        )
-        val cashSummary = getCashAndResultUseCase(
-            CashAndResultRequest(
-                methods = cash.methods,
-                openings = base.openings,
-                counts = base.counts,
+        val feedBundle = combine(feedPurchasesFlow, feedDepletionsFlow, feedLossesFlow) { p, d, l ->
+            Triple(p.map { it.purchase }, d.map { it.depletion }, l.map { it.loss })
+        }
+        val cashBundle = combine(methodsFlow, salesFlow, paymentsFlow, expensesFlow, withdrawalsFlow) { m, s, p, e, w ->
+            CashBundle(
+                methods = m,
+                sales = s.map { it.sale },
+                payments = p.values.flatten().map { it.payment },
+                expenses = e.map { it.expense },
+                withdrawals = w.map { it.withdrawal },
+            )
+        }
+        val baseBundle = combine(openingsFlow, hasPendingOpeningsFlow, countsFlow, closingsFlow, reversalsFlow) { o, p, c, cl, r ->
+            BaseBundle(o, p, c, cl, r.map { it.reversal })
+        }
+
+        return combine(
+            formState,
+            isAdmin,
+            baseBundle,
+            feedBundle,
+            cashBundle,
+        ) { form, admin, base, feed, cash ->
+            val closingInputs = ClosingInputs(
                 sales = cash.sales,
                 payments = cash.payments,
                 expenses = cash.expenses,
                 feedPurchases = feed.first,
-                feedDepletions = feed.second,
                 withdrawals = cash.withdrawals,
                 reversals = base.reversals,
-                periodStart = today,
-                periodEnd = today,
-            ),
-        )
-        CountsAndOpeningUiState(
-            form = form,
-            isAdmin = admin,
-            hasPendingOpenings = base.hasPendingOpenings,
-            expectedFeedKg = feedSummaries.mapValues { (_, v) -> v.balanceKg },
-            expectedCashByMethod = cashSummary.balancesByMethod.associate { it.method.id to it.balance },
-            paymentMethods = cash.methods,
-            openings = base.openings,
-            counts = base.counts,
-            closings = base.closings,
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(0L),
-        initialValue = CountsAndOpeningUiState(form = initialFormState(OperationalDate.today(clock))),
-    )
+            )
+            val today = OperationalDate.today(clock)
+            val feedSummaries = getFeedBalanceUseCase(
+                FeedSummaryRequest(
+                    openings = base.openings,
+                    counts = base.counts,
+                    purchases = feed.first,
+                    depletions = feed.second,
+                    losses = feed.third,
+                    reversals = base.reversals,
+                    periodStart = today,
+                    periodEnd = today,
+                ),
+            )
+            val cashSummary = getCashAndResultUseCase(
+                CashAndResultRequest(
+                    methods = cash.methods,
+                    openings = base.openings,
+                    counts = base.counts,
+                    sales = cash.sales,
+                    payments = cash.payments,
+                    expenses = cash.expenses,
+                    feedPurchases = feed.first,
+                    feedDepletions = feed.second,
+                    withdrawals = cash.withdrawals,
+                    reversals = base.reversals,
+                    periodStart = today,
+                    periodEnd = today,
+                ),
+            )
+            CountsAndOpeningUiState(
+                sessionUid = uid,
+                closingInputs = closingInputs,
+                form = form,
+                isAdmin = admin,
+                hasPendingOpenings = base.hasPendingOpenings,
+                expectedFeedKg = feedSummaries.mapValues { (_, v) -> v.balanceKg },
+                expectedCashByMethod = cashSummary.balancesByMethod.associate { it.method.id to it.balance },
+                paymentMethods = cash.methods,
+                openings = base.openings,
+                counts = base.counts,
+                closings = base.closings,
+            )
+        }
+    }
 
     fun syncSession(session: SessionState) {
         val auth = session as? SessionState.Authenticated
@@ -234,6 +229,7 @@ class CountsAndOpeningViewModel @Inject constructor(
 
     fun submit(session: SessionState.Authenticated) {
         val current = uiState.value
+        if (current.sessionUid != session.uid || current.readError != null) return
         val state = current.form
         val parsedDate = runCatching { OperationalDate.parse(state.dateInput.trim()) }.getOrElse { ex ->
             formState.update { it.copy(formError = ex.message ?: "Fecha inválida.") }
@@ -356,6 +352,7 @@ class CountsAndOpeningViewModel @Inject constructor(
         val omittedKeys = omitted.joinToString(", ").ifEmpty { "ninguno" }
         val closingSummary = if (state.isClosing) {
             buildClosingSummary(
+                inputs = current.closingInputs,
                 fecha = parsedDate,
                 feedItems = feedItems,
                 cashItems = cashItems,
@@ -393,58 +390,6 @@ class CountsAndOpeningViewModel @Inject constructor(
         )
     }
 
-    private fun buildClosingSummary(
-        fecha: LocalDate,
-        feedItems: Map<String, CountItem>,
-        cashItems: Map<String, CountItem>,
-        omittedCount: Long,
-    ): Map<String, Long> {
-        val inputs = latestClosingInputs
-        val revSales = reversedIds(inputs.reversals, ReversalTargetCollection.SALES)
-        val revPayments = reversedIds(inputs.reversals, ReversalTargetCollection.PAYMENTS)
-        val revExpenses = reversedIds(inputs.reversals, ReversalTargetCollection.EXPENSES)
-        val revFeedPurchases = reversedIds(inputs.reversals, ReversalTargetCollection.FEED_PURCHASES)
-        val revWithdrawals = reversedIds(inputs.reversals, ReversalTargetCollection.WITHDRAWALS)
-
-        val salesTotal = inputs.sales
-            .filter { it.id !in revSales && it.fechaOperativa == fecha }
-            .sumOf { it.total }
-        val dayPayments = inputs.payments.filter { it.id !in revPayments && it.fechaOperativa == fecha }
-        val collectionsTotal = dayPayments.filter { it.type == PaymentType.PAYMENT }.sumOf { it.amount }
-        val refundsTotal = dayPayments
-            .filter { it.type == PaymentType.REFUND || it.type == PaymentType.OVERPAYMENT_REFUND }
-            .sumOf { it.amount }
-        val operatingExpensesTotal = inputs.expenses
-            .filter { it.id !in revExpenses && it.fechaOperativa == fecha }
-            .sumOf { it.amount }
-        val feedPurchasesTotal = inputs.feedPurchases
-            .filter { it.id !in revFeedPurchases && it.fechaOperativa == fecha }
-            .sumOf { it.totalCost }
-        val withdrawalsTotal = inputs.withdrawals
-            .filter { it.id !in revWithdrawals && it.fechaOperativa == fecha }
-            .sumOf { it.amount }
-
-        return mapOf(
-            "salesTotal" to salesTotal,
-            "collectionsTotal" to collectionsTotal,
-            "refundsTotal" to refundsTotal,
-            "operatingExpensesTotal" to operatingExpensesTotal,
-            "feedPurchasesTotal" to feedPurchasesTotal,
-            "withdrawalsTotal" to withdrawalsTotal,
-            "countedFeedItemsCount" to feedItems.size.toLong(),
-            "countedCashItemsCount" to cashItems.size.toLong(),
-            "omittedItemsCount" to omittedCount,
-            "feedDifferenceTotalKg" to feedItems.values.sumOf { it.difference },
-            "cashDifferenceTotal" to cashItems.values.sumOf { it.difference },
-            "totalCashCounted" to cashItems.values.sumOf { it.physical },
-        )
-    }
-
-    private fun reversedIds(
-        reversals: List<com.egglytics.domain.model.Reversal>,
-        collection: ReversalTargetCollection,
-    ): Set<String> = reversals.asSequence().filter { it.targetCollection == collection }.map { it.targetId }.toSet()
-
     private fun initialFormState(today: LocalDate): CountsFormState =
         CountsFormState(dateInput = OperationalDate.format(today))
 
@@ -464,12 +409,4 @@ class CountsAndOpeningViewModel @Inject constructor(
         val reversals: List<com.egglytics.domain.model.Reversal>,
     )
 
-    private data class ClosingInputs(
-        val sales: List<Sale> = emptyList(),
-        val payments: List<com.egglytics.domain.model.Payment> = emptyList(),
-        val expenses: List<com.egglytics.domain.model.Expense> = emptyList(),
-        val feedPurchases: List<com.egglytics.domain.model.FeedPurchase> = emptyList(),
-        val withdrawals: List<com.egglytics.domain.model.Withdrawal> = emptyList(),
-        val reversals: List<com.egglytics.domain.model.Reversal> = emptyList(),
-    )
 }

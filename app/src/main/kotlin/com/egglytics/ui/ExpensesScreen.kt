@@ -30,12 +30,39 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.ui.components.SyncStatusBadge
 import com.egglytics.ui.components.VoidReasonDialog
 
 @OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun ExpensesRoute(
+    session: SessionState.Authenticated,
+    expensesViewModel: ExpensesViewModel,
+    onBack: () -> Unit,
+) {
+    val expensesUi by expensesViewModel.uiState.collectAsStateWithLifecycle()
+    ExpensesScreen(
+        currency = session.business.currency,
+        state = expensesUi,
+        onBack = onBack,
+        onModeChange = expensesViewModel::onModeChange,
+        onAmountChange = expensesViewModel::onAmountChange,
+        onCategorySelect = expensesViewModel::onCategorySelect,
+        onMethodSelect = expensesViewModel::onMethodSelect,
+        onDateChange = expensesViewModel::onDateChange,
+        onDescriptionChange = expensesViewModel::onDescriptionChange,
+        onNoteChange = expensesViewModel::onNoteChange,
+        onSubmit = { expensesViewModel.submit(session) },
+        onVoidMovement = { col, id, reason ->
+            expensesViewModel.voidMovement(session, col, id, reason)
+        },
+    )
+}
+
 @Composable
 fun ExpensesScreen(
     currency: String,

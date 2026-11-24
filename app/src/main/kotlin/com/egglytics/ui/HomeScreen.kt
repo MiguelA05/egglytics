@@ -17,8 +17,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
 import com.egglytics.data.repository.SubmissionKind
 import com.egglytics.data.repository.SubmissionReceipt
@@ -26,6 +28,31 @@ import com.egglytics.data.repository.SubmissionSyncStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.usecase.ActivePriceResult
+
+@Composable
+internal fun HomeRoute(
+    session: SessionState.Authenticated,
+    homeViewModel: HomeViewModel,
+    sessionUi: SessionUiState,
+    navigateTo: (AppDestination) -> Unit,
+    onSignOut: () -> Unit,
+) {
+    val homeUi by homeViewModel.uiState.collectAsStateWithLifecycle()
+    HomeScreen(
+        session = session,
+        state = sessionUi,
+        homeState = homeUi,
+        onOpenHarvests = { navigateTo(AppDestination.HARVESTS) },
+        onOpenSales = { navigateTo(AppDestination.SALES) },
+        onOpenFeed = { navigateTo(AppDestination.FEED) },
+        onOpenExpenses = { navigateTo(AppDestination.EXPENSES) },
+        onOpenCash = { navigateTo(AppDestination.CASH) },
+        onOpenCounts = { navigateTo(AppDestination.COUNTS) },
+        onRetryReconcile = homeViewModel::retryReconcile,
+        onDismissSyncNotice = homeViewModel::dismissSyncNotice,
+        onSignOut = onSignOut,
+    )
+}
 
 @Composable
 fun HomeScreen(

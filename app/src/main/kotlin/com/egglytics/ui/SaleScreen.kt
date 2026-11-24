@@ -27,7 +27,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.ObservedSale
+import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
@@ -35,6 +37,34 @@ import com.egglytics.domain.usecase.ActivePriceResult
 import com.egglytics.domain.usecase.SaleReversalEligibility
 import com.egglytics.ui.components.SyncStatusBadge
 import com.egglytics.ui.components.VoidReasonDialog
+
+@Composable
+internal fun SaleRoute(
+    session: SessionState.Authenticated,
+    saleViewModel: SaleViewModel,
+    activePrices: Map<EggClassification, ActivePriceResult>,
+    onBack: () -> Unit,
+) {
+    val saleUi by saleViewModel.uiState.collectAsStateWithLifecycle()
+    SaleScreen(
+        currency = session.business.currency,
+        activePrices = activePrices,
+        state = saleUi,
+        onBack = onBack,
+        onSaleClassificationChange = saleViewModel::onSaleClassificationChange,
+        onPaymentMethodSelect = saleViewModel::onPaymentMethodSelect,
+        onSaleBucketsChange = saleViewModel::onSaleBucketsChange,
+        onSaleDateChange = saleViewModel::onSaleDateChange,
+        onSaleNoteChange = saleViewModel::onSaleNoteChange,
+        onSubmitSale = {
+            saleViewModel.submitSale(session, activePrices)
+        },
+        onMarkSaleDelivered = saleViewModel::markSaleDelivered,
+        onVoidSale = { item, reason ->
+            saleViewModel.voidSale(session, item, reason)
+        },
+    )
+}
 
 @Composable
 fun SaleScreen(

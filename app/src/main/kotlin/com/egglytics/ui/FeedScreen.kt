@@ -28,12 +28,45 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.FeedIngredient
 import com.egglytics.domain.model.FeedLossType
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.ui.components.SyncStatusBadge
 import com.egglytics.ui.components.VoidReasonDialog
+
+@Composable
+internal fun FeedRoute(
+    session: SessionState.Authenticated,
+    feedViewModel: FeedViewModel,
+    onBack: () -> Unit,
+) {
+    val feedUi by feedViewModel.uiState.collectAsStateWithLifecycle()
+    FeedScreen(
+        currency = session.business.currency,
+        state = feedUi,
+        onBack = onBack,
+        onModeChange = feedViewModel::onModeChange,
+        onIngredientChange = feedViewModel::onIngredientChange,
+        onBagsChange = feedViewModel::onBagsChange,
+        onTotalCostChange = feedViewModel::onTotalCostChange,
+        onMethodSelect = feedViewModel::onMethodSelect,
+        onSupplierChange = feedViewModel::onSupplierChange,
+        onLossKgChange = feedViewModel::onLossKgChange,
+        onLossTypeChange = feedViewModel::onLossTypeChange,
+        onLossReasonChange = feedViewModel::onLossReasonChange,
+        onDateChange = feedViewModel::onDateChange,
+        onNoteChange = feedViewModel::onNoteChange,
+        onPeriodStartChange = feedViewModel::onPeriodStartChange,
+        onPeriodEndChange = feedViewModel::onPeriodEndChange,
+        onSubmit = { feedViewModel.submit(session) },
+        onVoidMovement = { col, id, reason ->
+            feedViewModel.voidFeedMovement(session, col, id, reason)
+        },
+    )
+}
 
 @Composable
 fun FeedScreen(

@@ -50,6 +50,7 @@ import com.egglytics.domain.usecase.GetFeedBalanceUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -254,6 +255,52 @@ class CountsAndOpeningViewModelTest {
         assertEquals(1, vm.uiState.value.openings.size)
         assertEquals(120000L, vm.uiState.value.openings.first().quantity)
         job.cancel()
+    }
+
+    @Test
+    fun `failed read withdraws cash totals and blocks closing until screens reopen`() = runTest {
+        val failRead = MutableStateFlow(false)
+        val base = FakeOpeningAndCountRepository()
+        val openings = object : OpeningAndCountRepository by base {
+            override fun observeOpenings(): Flow<List<OpeningBalance>> = flow {
+                failRead.collect { failed ->
+                    check(!failed) { "Lectura interrumpida" }
+                    emit(emptyList())
+                }
+            }
+        }
+        val methods = FakePaymentMethodRepository()
+        val sales = FakeSaleRepository(emptyList(), emptyMap())
+        val feed = FakeFeedRepository(emptyList())
+        val expenses = FakeExpenseRepo(emptyList(), emptyList())
+        val reversals = FakeReversalRepository()
+        val cash = CashViewModel(methods, sales, feed, expenses, openings, reversals, GetCashAndResultUseCase(), fixedClock)
+        val counts = CountsAndOpeningViewModel(
+            openings, methods, feed, sales, expenses, reversals, GetFeedBalanceUseCase(), GetCashAndResultUseCase(), fixedClock,
+        )
+        cash.syncSession(adminSession)
+        counts.syncSession(adminSession)
+        fun observe() = listOf(launch { cash.uiState.collect {} }, launch { counts.uiState.collect {} })
+        val jobs = observe()
+        counts.onIsClosingChange(true)
+        advanceUntilIdle()
+        assertNotNull(cash.uiState.value.summary)
+        failRead.value = true
+        advanceUntilIdle()
+        assertNull(cash.uiState.value.summary)
+        assertNotNull(cash.uiState.value.error)
+        assertNotNull(counts.uiState.value.readError)
+        counts.submit(adminSession)
+        assertNull(base.lastCountSubmit)
+        jobs.forEach { it.cancel() }
+        advanceUntilIdle()
+        failRead.value = false
+        val reopened = observe()
+        advanceUntilIdle()
+        assertNotNull(cash.uiState.value.summary)
+        counts.submit(adminSession)
+        assertEquals(true, base.lastCountSubmit?.isClosing)
+        reopened.forEach { it.cancel() }
     }
 
     private class FakeOpeningAndCountRepository : OpeningAndCountRepository {

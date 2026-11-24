@@ -26,11 +26,34 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.ObservedHarvest
+import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.ui.components.SyncStatusBadge
 import com.egglytics.ui.components.VoidReasonDialog
+
+@Composable
+internal fun HarvestRoute(
+    session: SessionState.Authenticated,
+    harvestViewModel: HarvestViewModel,
+    onBack: () -> Unit,
+) {
+    val harvestUi by harvestViewModel.uiState.collectAsStateWithLifecycle()
+    HarvestScreen(
+        state = harvestUi,
+        onBack = onBack,
+        onHarvestQtyChange = harvestViewModel::onHarvestQtyChange,
+        onDiscardedChange = harvestViewModel::onDiscardedChange,
+        onHarvestDateChange = harvestViewModel::onHarvestDateChange,
+        onHarvestNoteChange = harvestViewModel::onHarvestNoteChange,
+        onSubmitHarvest = { harvestViewModel.submitHarvest(session) },
+        onVoidHarvest = { item, reason ->
+            harvestViewModel.voidHarvest(session, item, reason)
+        },
+    )
+}
 
 @Composable
 fun HarvestScreen(
