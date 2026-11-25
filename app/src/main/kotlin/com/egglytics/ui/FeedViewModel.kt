@@ -339,8 +339,8 @@ class FeedViewModel @Inject constructor(
         parsedDate: LocalDate,
         docId: String,
     ) {
-        val bags = state.bagsInput.trim().toLongOrNull()
-        if (bags == null || bags <= 0L) {
+        val bags = validBagCount(state.bagsInput)
+        if (bags == null) {
             formState.update { it.copy(formError = "Ingresa una cantidad válida de bultos.") }
             return
         }
@@ -379,8 +379,8 @@ class FeedViewModel @Inject constructor(
         parsedDate: LocalDate,
         docId: String,
     ) {
-        val bags = state.bagsInput.trim().toLongOrNull()
-        if (bags == null || bags <= 0L) {
+        val bags = validBagCount(state.bagsInput)
+        if (bags == null) {
             formState.update { it.copy(formError = "Ingresa una cantidad válida de bultos agotados.") }
             return
         }
@@ -437,7 +437,9 @@ class FeedViewModel @Inject constructor(
     )
 
     companion object {
-        fun previewKg(bagsInput: String): Long? =
-            bagsInput.trim().toLongOrNull()?.takeIf { it > 0L }?.times(KG_PER_FEED_BAG)
+        private fun validBagCount(input: String): Long? =
+            input.trim().toLongOrNull()?.takeIf { it in 1..Long.MAX_VALUE / KG_PER_FEED_BAG }
+
+        fun previewKg(bagsInput: String): Long? = validBagCount(bagsInput)?.times(KG_PER_FEED_BAG)
     }
 }
