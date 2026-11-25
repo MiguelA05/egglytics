@@ -1,28 +1,25 @@
 package com.egglytics.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import com.egglytics.R
+import com.egglytics.domain.model.SaleLine
+import java.math.BigInteger
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -42,6 +39,7 @@ internal fun HarvestRoute(
 ) {
     val harvestUi by harvestViewModel.uiState.collectAsStateWithLifecycle()
     HarvestScreen(
+        businessName = session.business.name,
         state = harvestUi,
         onBack = onBack,
         onHarvestQtyChange = harvestViewModel::onHarvestQtyChange,
@@ -57,6 +55,7 @@ internal fun HarvestRoute(
 
 @Composable
 fun HarvestScreen(
+    businessName: String,
     state: HarvestUiState,
     onBack: () -> Unit,
     onHarvestQtyChange: (EggClassification, String) -> Unit,
@@ -68,142 +67,142 @@ fun HarvestScreen(
 ) {
     var harvestToVoid by remember { mutableStateOf<ObservedHarvest?>(null) }
 
-    val pendingTarget = harvestToVoid
-    if (pendingTarget != null) {
-        VoidReasonDialog(
-            title = "Anular recolección",
-            description = "Se registrará un reverso para la recolección del ${
-                OperationalDate.format(pendingTarget.harvest.fechaOperativa)
-            }.",
-            onDismiss = { harvestToVoid = null },
-            onConfirm = { reason ->
-                harvestToVoid = null
-                onVoidHarvest(pendingTarget, reason)
-            },
-        )
-    }
-    Scaffold { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item {
+    var showHistory by rememberSaveable { mutableStateOf(false) }
+    val shape = RoundedCornerShape(16.dp)
+    MaterialTheme(colorScheme = egglyticsColors) {
+        val target = harvestToVoid
+        if (target != null) {
+            VoidReasonDialog(
+                title = "Anular recolección",
+                description = "Se registrará un reverso para la recolección del ${OperationalDate.format(target.harvest.fechaOperativa)}.",
+                onDismiss = { harvestToVoid = null },
+                onConfirm = { reason ->
+                    harvestToVoid = null
+                    onVoidHarvest(target, reason)
+                },
+            )
+        }
+        Scaffold(containerColor = egglyticsColors.background) { insets ->
+            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = "Recolección",
-                        style = MaterialTheme.typography.headlineSmall,
-                    )
-                    OutlinedButton(onClick = onBack) {
-                        Text("Volver")
+                    Column(Modifier.weight(1f)) {
+                        Text("Recolección", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(businessName, style = MaterialTheme.typography.bodySmall, color = egglyticsColors.onSurfaceVariant)
                     }
+                    TextButton(onClick = onBack) { Text("Volver") }
                 }
-            }
-
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedTextField(
-                            value = state.form.harvestDateInput,
-                            onValueChange = onHarvestDateChange,
-                            label = { Text("Fecha operativa (YYYY-MM-DD)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        EggClassification.entries.chunked(3).forEach { rowItems ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                rowItems.forEach { classification ->
-                                    OutlinedTextField(
-                                        value = state.form.harvestInputs[classification].orEmpty(),
-                                        onValueChange = { onHarvestQtyChange(classification, it) },
-                                        label = { Text(classification.name) },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.weight(1f),
-                                    )
+                TabRow(selectedTabIndex = if (showHistory) 1 else 0, containerColor = egglyticsColors.background) {
+                    Tab(selected = !showHistory, onClick = { showHistory = false }, text = { Text("Registro") })
+                    Tab(selected = showHistory, onClick = { showHistory = true }, text = { Text("Historial (${state.harvests.size})") })
+                }
+                if (showHistory) {
+                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        state.harvestsError?.let { item { Text(it, color = egglyticsColors.error) } }
+                        if (state.harvests.isEmpty() && state.harvestsError == null) {
+                            item {
+                                Surface(shape = shape, modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Icon(painterResource(R.drawable.login_egg), null, tint = egglyticsColors.primary)
+                                        Text("Sin recolecciones registradas", style = MaterialTheme.typography.titleMedium)
+                                        Button(onClick = { showHistory = false }) { Text("Registrar primera recolección") }
+                                    }
                                 }
                             }
                         }
-                        OutlinedTextField(
-                            value = state.form.discardedInput,
-                            onValueChange = onDiscardedChange,
-                            label = { Text("Descartados") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = state.form.harvestNoteInput,
-                            onValueChange = onHarvestNoteChange,
-                            label = { Text("Nota (opcional)") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        if (state.form.harvestError != null) {
-                            Text(
-                                text = state.form.harvestError,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
+                        items(state.harvests, key = { it.harvest.id }) { item ->
+                            val reason = state.reversedHarvestReasons[item.harvest.id]
+                            HarvestRowCard(item, reason, state.canVoid && !item.isPendingWrite && reason == null,
+                                item.harvest.id in state.voidingHarvestIds, onVoidClick = { harvestToVoid = item })
+                        }
+                    }
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            OutlinedTextField(
+                                value = state.form.harvestDateInput, onValueChange = onHarvestDateChange,
+                                label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true,
+                                modifier = Modifier.fillMaxWidth(), shape = shape,
                             )
                         }
-                        Button(
-                            onClick = onSubmitHarvest,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Guardar recolección")
+                        item {
+                            Surface(shape = shape) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Huevos por clasificación", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                    EggClassification.entries.forEach { classification ->
+                                        QuantityField(classification.name, state.form.harvestInputs[classification].orEmpty()) {
+                                            onHarvestQtyChange(classification, it)
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    val total = gradedTotal(state.form.harvestInputs)
+                                    Text("Total de aptos", style = MaterialTheme.typography.labelLarge)
+                                    val totalLabel = when (total) {
+                                        null -> "Revisa las cantidades"
+                                        BigInteger.ONE -> "1 huevo"
+                                        else -> "$total huevos"
+                                    }
+                                    Text(totalLabel,
+                                        color = egglyticsColors.primary, style = MaterialTheme.typography.headlineSmall)
+                                    if (total != null) {
+                                        val (buckets, remainder) = total.divideAndRemainder(SaleLine.EGGS_PER_BUCKET.toBigInteger())
+                                        Text("Cubetas completas: $buckets · Huevos sueltos: $remainder",
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Surface(shape = shape, color = egglyticsColors.secondaryContainer) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Huevos descartados", style = MaterialTheme.typography.titleMedium)
+                                    QuantityField("Descartados", state.form.discardedInput, onDiscardedChange)
+                                }
+                            }
+                        }
+                        item {
+                            OutlinedTextField(value = state.form.harvestNoteInput, onValueChange = onHarvestNoteChange,
+                                label = { Text("Nota (opcional)") }, modifier = Modifier.fillMaxWidth(), shape = shape)
+                        }
+                        item {
+                            state.form.harvestError?.let { Text(it, color = egglyticsColors.error) }
+                            Button(onClick = onSubmitHarvest, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = shape) {
+                                Text("Guardar recolección")
+                            }
                         }
                     }
                 }
             }
-
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Recolecciones (${state.harvests.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (state.harvestsError != null) {
-                    Text(
-                        text = state.harvestsError,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            if (state.harvests.isEmpty()) {
-                item {
-                    Text(
-                        text = "Sin recolecciones registradas.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            } else {
-                items(state.harvests, key = { it.harvest.id }) { item ->
-                    val voidReason = state.reversedHarvestReasons[item.harvest.id]
-                    HarvestRowCard(
-                        observed = item,
-                        voidReason = voidReason,
-                        canVoid = state.canVoid && !item.isPendingWrite && voidReason == null,
-                        isVoiding = item.harvest.id in state.voidingHarvestIds,
-                        onVoidClick = { harvestToVoid = item },
-                    )
-                }
-            }
         }
+    }
+}
+
+private fun gradedTotal(inputs: Map<EggClassification, String>): BigInteger? {
+    var total = BigInteger.ZERO
+    for (raw in inputs.values) {
+        if (raw.isBlank()) continue
+        val count = raw.trim().toLongOrNull()?.takeIf { it >= 0 } ?: return null
+        total += count.toBigInteger()
+    }
+    return total
+}
+
+@Composable
+private fun QuantityField(label: String, value: String, onChange: (String) -> Unit) {
+    val count = if (value.isBlank()) 0L else value.trim().toLongOrNull()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(
+            value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
+        )
+        IconButton(enabled = count != null && count > 0, onClick = { count?.let { onChange((it - 1).toString()) } },
+            modifier = Modifier.semantics { contentDescription = "Restar un huevo: $label" }) { Text("−") }
+        IconButton(enabled = count != null && count in 0 until Long.MAX_VALUE, onClick = { count?.let { onChange((it + 1).toString()) } },
+            modifier = Modifier.semantics { contentDescription = "Sumar un huevo: $label" }) { Text("+") }
     }
 }
 
@@ -221,7 +220,7 @@ private fun HarvestRowCard(
         .joinToString(" · ")
         .ifEmpty { "Aptos: 0" }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
