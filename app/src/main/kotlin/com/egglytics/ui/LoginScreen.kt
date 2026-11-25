@@ -12,7 +12,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -24,17 +23,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.egglytics.R
-
-private val loginColors = lightColorScheme(
-    primary = Color(0xFF1C4B27),
-    onPrimary = Color.White,
-    background = Color(0xFFFFF8F0),
-    surface = Color.White,
-    onSurface = Color(0xFF201B0E),
-    onSurfaceVariant = Color(0xFF414940),
-    outline = Color(0xFF727970),
-    secondaryContainer = Color(0xFFF8EDD8),
-)
 
 @Composable
 fun LoginScreen(
@@ -49,8 +37,8 @@ fun LoginScreen(
     var showPassword by remember(isLoading) { mutableStateOf(false) }
     val canSubmit = email.isNotBlank() && password.isNotBlank() && !isLoading
 
-    MaterialTheme(colorScheme = loginColors) {
-        Scaffold(containerColor = loginColors.background) { insets ->
+    MaterialTheme(colorScheme = egglyticsColors) {
+        Scaffold(containerColor = egglyticsColors.background) { insets ->
             Column(
                 modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)
                     .imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -58,14 +46,14 @@ fun LoginScreen(
             ) {
                 Spacer(Modifier.height(24.dp))
                 Box(
-                    modifier = Modifier.size(64.dp).background(loginColors.secondaryContainer, CircleShape),
+                    modifier = Modifier.size(64.dp).background(egglyticsColors.secondaryContainer, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(painterResource(R.drawable.login_egg), null, Modifier.size(36.dp), tint = loginColors.primary)
+                    Icon(painterResource(R.drawable.login_egg), null, Modifier.size(36.dp), tint = egglyticsColors.primary)
                 }
                 Spacer(Modifier.height(8.dp))
                 Text("Egglytics", style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold, color = loginColors.primary)
+                    fontWeight = FontWeight.Bold, color = egglyticsColors.primary)
                 Spacer(Modifier.height(24.dp))
                 Surface(
                     modifier = Modifier.widthIn(max = 440.dp).fillMaxWidth(),
@@ -113,7 +101,7 @@ fun LoginScreen(
                             Text(
                                 rejectionMessage,
                                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                                color = loginColors.error,
+                                color = egglyticsColors.error,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }

@@ -1,25 +1,26 @@
 package com.egglytics.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.egglytics.R
+import com.egglytics.domain.model.MemberRole
+import java.text.NumberFormat
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
 import com.egglytics.data.repository.SubmissionKind
@@ -69,233 +70,128 @@ fun HomeScreen(
     onDismissSyncNotice: (String) -> Unit,
     onSignOut: () -> Unit,
 ) {
-    Scaffold { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = session.business.name,
-                            style = MaterialTheme.typography.headlineSmall,
-                        )
-                        Text(
-                            text = "${session.member.name} · ${session.member.role.name}",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = "Inicio: ${OperationalDate.format(session.business.startDate)} · Hoy: ${OperationalDate.format(state.operationalDate)}",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    OutlinedButton(onClick = onSignOut) {
-                        Text("Salir")
-                    }
-                }
-            }
+    val currency = session.business.currency
+    val numbers = remember { NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CO")) }
+    val dates = remember { DateTimeFormatter.ofPattern("d MMM yyyy", Locale.forLanguageTag("es-CO")) }
+    val summary = homeState.summary
 
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Inicio",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Button(
-                        onClick = onOpenHarvests,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Recolección")
-                    }
-                    Button(
-                        onClick = onOpenSales,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Ventas")
-                    }
-                    Button(
-                        onClick = onOpenFeed,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Alimento")
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Button(
-                        onClick = onOpenExpenses,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Gastos")
-                    }
-                    Button(
-                        onClick = onOpenCash,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Caja")
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = onOpenCounts,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Conteos / Cierre")
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Resumen de hoy",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        SummaryRow(
-                            label = "Huevos aptos recogidos",
-                            value = if (homeState.harvestsIncomplete) "Incompleto" else "${homeState.summary.gradedEggs}",
-                        )
-                        SummaryRow(
-                            label = "Huevos descartados",
-                            value = if (homeState.harvestsIncomplete) "Incompleto" else "${homeState.summary.discardedEggs}",
-                        )
-                        SummaryRow(
-                            label = "Total vendido",
-                            value = if (homeState.salesIncomplete) {
-                                "Incompleto"
-                            } else {
-                                "${homeState.summary.totalSold} ${session.business.currency}"
-                            },
-                        )
-                        SummaryRow(
-                            label = "Total cobrado",
-                            value = if (homeState.paymentsIncomplete) {
-                                "Incompleto"
-                            } else {
-                                "${homeState.summary.totalCollected} ${session.business.currency}"
-                            },
-                        )
-                        SummaryRow(
-                            label = "Cubetas por entregar (acumulado)",
-                            value = if (homeState.salesIncomplete) {
-                                "Incompleto"
-                            } else {
-                                "${homeState.summary.pendingDeliveryBuckets}"
-                            },
-                        )
-                        if (homeState.pendingSyncCount > 0) {
-                            Text(
-                                text = "Incluye ${homeState.pendingSyncCount} movimiento(s) pendiente(s) de sincronización",
-                                color = MaterialTheme.colorScheme.tertiary,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        if (homeState.summaryError != null) {
-                            Text(
-                                text = homeState.summaryError,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (homeState.syncNotices.isNotEmpty()) {
+    MaterialTheme(colorScheme = egglyticsColors) {
+        Scaffold(containerColor = egglyticsColors.background) { insets ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(insets),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 item {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Avisos de sincronización (${homeState.syncNotices.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                items(homeState.syncNotices, key = { it.submissionId }) { notice ->
-                    SyncNoticeCard(
-                        notice = notice,
-                        isReconciling = homeState.isReconciling,
-                        onOpenDestination = {
-                            when (notice.kind) {
-                                SubmissionKind.HARVEST -> onOpenHarvests()
-                                SubmissionKind.SALE_WITH_PAYMENT -> onOpenSales()
-                                SubmissionKind.FEED_PURCHASE,
-                                SubmissionKind.FEED_DEPLETION,
-                                SubmissionKind.FEED_LOSS,
-                                -> onOpenFeed()
-                                SubmissionKind.EXPENSE,
-                                SubmissionKind.WITHDRAWAL,
-                                -> onOpenExpenses()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(painterResource(R.drawable.login_egg), null, tint = egglyticsColors.primary)
+                        Text("Egglytics", Modifier.weight(1f).padding(start = 6.dp),
+                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        TextButton(onClick = onSignOut) { Text("Salir") }
+                    }
+                    Surface(color = egglyticsColors.surface, shape = panelShape) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                            Text(session.business.name, style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold, color = egglyticsColors.primary)
+                            val role = when (session.member.role) {
+                                MemberRole.ADMIN -> "Administración"
+                                MemberRole.OPERATOR -> "Operación"
                             }
-                        },
-                        onRetryReconcile = onRetryReconcile,
-                        onDismiss = { onDismissSyncNotice(notice.submissionId) },
-                    )
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Precios vigentes",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (state.pricesError != null) {
-                    Text(
-                        text = state.pricesError,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            items(EggClassification.entries) { classification ->
-                val result = state.activePrices[classification] ?: ActivePriceResult.NotFound
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = classification.name,
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        val label = when (result) {
-                            is ActivePriceResult.Found -> "${result.price.pricePerBucket} ${session.business.currency}"
-                            ActivePriceResult.NotFound -> "Sin precio vigente"
+                            Text("${session.member.name} · $role")
+                            Text("Hoy, ${dates.format(state.operationalDate)} · Desde ${dates.format(session.business.startDate)}",
+                                style = MaterialTheme.typography.bodySmall, color = egglyticsColors.onSurfaceVariant)
                         }
+                    }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CaptureAction("Registrar recolección", "Huevos por clasificación y descartados",
+                            egglyticsColors.primary, egglyticsColors.onPrimary, onOpenHarvests)
+                        CaptureAction("Registrar venta", "Cubetas y cobro por forma de pago",
+                            egglyticsColors.secondaryContainer, egglyticsColors.onSurface, onOpenSales)
+                    }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ModuleButton("Alimento", onOpenFeed, Modifier.weight(1f))
+                            ModuleButton("Gastos y retiros", onOpenExpenses, Modifier.weight(1f))
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ModuleButton("Caja y análisis", onOpenCash, Modifier.weight(1f))
+                            ModuleButton("Conteos / Cierre", onOpenCounts, Modifier.weight(1f))
+                        }
+                    }
+                }
+                item {
+                    SectionTitle("Resumen de hoy")
+                    Surface(shape = panelShape, color = egglyticsColors.surface) {
+                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Metric("Huevos aptos", if (homeState.harvestsIncomplete) "Incompleto" else numbers.format(summary.gradedEggs), Modifier.weight(1f))
+                                Metric("Descartados", if (homeState.harvestsIncomplete) "Incompleto" else numbers.format(summary.discardedEggs), Modifier.weight(1f))
+                            }
+                            HorizontalDivider()
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Metric("Total vendido", if (homeState.salesIncomplete) "Incompleto" else "${numbers.format(summary.totalSold)} $currency", Modifier.weight(1f))
+                                Metric("Total cobrado", if (homeState.paymentsIncomplete) "Incompleto" else "${numbers.format(summary.totalCollected)} $currency", Modifier.weight(1f))
+                            }
+                            HorizontalDivider()
+                            Metric("Cubetas por entregar · Acumulado", if (homeState.salesIncomplete) "Incompleto" else numbers.format(summary.pendingDeliveryBuckets))
+                            if (homeState.pendingSyncCount > 0) {
+                                Text("Movimientos pendientes de sincronización: ${homeState.pendingSyncCount}",
+                                    color = egglyticsColors.onSecondaryContainer, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            homeState.summaryError?.let { Text(it, color = egglyticsColors.error) }
+                        }
+                    }
+                }
+                if (homeState.syncNotices.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodyLarge,
+                            text = "Avisos de sincronización (${homeState.syncNotices.size})",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.error,
                         )
+                    }
+                    items(homeState.syncNotices, key = { it.submissionId }) { notice ->
+                        SyncNoticeCard(
+                            notice = notice,
+                            isReconciling = homeState.isReconciling,
+                            onOpenDestination = {
+                                when (notice.kind) {
+                                    SubmissionKind.HARVEST -> onOpenHarvests()
+                                    SubmissionKind.SALE_WITH_PAYMENT -> onOpenSales()
+                                    SubmissionKind.FEED_PURCHASE,
+                                    SubmissionKind.FEED_DEPLETION,
+                                    SubmissionKind.FEED_LOSS,
+                                    -> onOpenFeed()
+                                    SubmissionKind.EXPENSE,
+                                    SubmissionKind.WITHDRAWAL,
+                                    -> onOpenExpenses()
+                                }
+                            },
+                            onRetryReconcile = onRetryReconcile,
+                            onDismiss = { onDismissSyncNotice(notice.submissionId) },
+                        )
+                    }
+                }
+                item {
+                    SectionTitle("Precios vigentes por cubeta")
+                    Surface(shape = panelShape, color = egglyticsColors.surface) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            state.pricesError?.let { Text(it, color = egglyticsColors.error) }
+                            EggClassification.entries.forEachIndexed { index, classification ->
+                                if (index > 0) HorizontalDivider()
+                                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(classification.name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                    val price = state.activePrices[classification] as? ActivePriceResult.Found
+                                    Text(price?.let { "${numbers.format(it.price.pricePerBucket)} $currency" } ?: "Sin precio vigente",
+                                        color = if (price == null) egglyticsColors.onSurfaceVariant else egglyticsColors.primary)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -303,23 +199,43 @@ fun HomeScreen(
     }
 }
 
+private val panelShape = RoundedCornerShape(16.dp)
+
 @Composable
-private fun SummaryRow(
-    label: String,
-    value: String,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-        )
+private fun CaptureAction(title: String, detail: String, background: Color, foreground: Color, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = panelShape, color = background, contentColor = foreground) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(detail, style = MaterialTheme.typography.bodySmall)
+            }
+            Canvas(Modifier.padding(start = 12.dp).size(18.dp)) {
+                val stroke = 2.dp.toPx()
+                drawLine(foreground, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), stroke)
+                drawLine(foreground, Offset(size.width / 2, 0f), Offset(size.width, size.height / 2), stroke)
+                drawLine(foreground, Offset(size.width / 2, size.height), Offset(size.width, size.height / 2), stroke)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModuleButton(label: String, onClick: () -> Unit, modifier: Modifier) {
+    OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(12.dp)) {
+        Text(label)
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String) {
+    Text(title, Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun Metric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = egglyticsColors.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -362,7 +278,7 @@ private fun SyncNoticeCard(
         "ID: ${notice.primaryDocId}"
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = panelShape, color = egglyticsColors.errorContainer) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
