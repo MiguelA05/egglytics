@@ -1,22 +1,40 @@
 package com.egglytics.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.egglytics.R
+
+private val loginColors = lightColorScheme(
+    primary = Color(0xFF1C4B27),
+    onPrimary = Color.White,
+    background = Color(0xFFFFF8F0),
+    surface = Color.White,
+    onSurface = Color(0xFF201B0E),
+    onSurfaceVariant = Color(0xFF414940),
+    outline = Color(0xFF727970),
+    secondaryContainer = Color(0xFFF8EDD8),
+)
 
 @Composable
 fun LoginScreen(
@@ -28,55 +46,90 @@ fun LoginScreen(
     onPasswordChange: (String) -> Unit,
     onSignIn: () -> Unit,
 ) {
-    Scaffold { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = "Egglytics",
-                style = MaterialTheme.typography.headlineMedium,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            OutlinedTextField(
-                value = email,
-                onValueChange = onEmailChange,
-                label = { Text("Correo") },
-                singleLine = true,
-                enabled = !isLoading,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = password,
-                onValueChange = onPasswordChange,
-                label = { Text("Contraseña") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                enabled = !isLoading,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (rejectionMessage != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = rejectionMessage,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = onSignIn,
-                enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
+    var showPassword by remember(isLoading) { mutableStateOf(false) }
+    val canSubmit = email.isNotBlank() && password.isNotBlank() && !isLoading
+
+    MaterialTheme(colorScheme = loginColors) {
+        Scaffold(containerColor = loginColors.background) { insets ->
+            Column(
+                modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)
+                    .imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.height(20.dp))
-                } else {
-                    Text("Iniciar sesión")
+                Spacer(Modifier.height(24.dp))
+                Box(
+                    modifier = Modifier.size(64.dp).background(loginColors.secondaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(R.drawable.login_egg), null, Modifier.size(36.dp), tint = loginColors.primary)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Egglytics", style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold, color = loginColors.primary)
+                Spacer(Modifier.height(24.dp))
+                Surface(
+                    modifier = Modifier.widthIn(max = 440.dp).fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    shadowElevation = 2.dp,
+                ) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Acceso a tu cuenta", style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(
+                            value = email,
+                            onValueChange = onEmailChange,
+                            label = { Text("Correo") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                            singleLine = true,
+                            enabled = !isLoading,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = onPasswordChange,
+                            label = { Text("Contraseña") },
+                            singleLine = true,
+                            enabled = !isLoading,
+                            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { if (canSubmit) onSignIn() }),
+                            trailingIcon = {
+                                IconToggleButton(
+                                    checked = showPassword,
+                                    onCheckedChange = { showPassword = it },
+                                    enabled = !isLoading,
+                                ) {
+                                    Icon(
+                                        painterResource(if (showPassword) R.drawable.login_eye_off else R.drawable.login_eye),
+                                        contentDescription = if (showPassword) "Ocultar contraseña" else "Mostrar contraseña",
+                                    )
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (rejectionMessage != null) {
+                            Text(
+                                rejectionMessage,
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                                color = loginColors.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        Button(
+                            onClick = onSignIn,
+                            enabled = canSubmit,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(Modifier.size(18.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(if (isLoading) "Verificando credenciales…" else "Iniciar sesión")
+                        }
+                    }
                 }
             }
         }
