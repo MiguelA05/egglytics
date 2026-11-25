@@ -1,29 +1,24 @@
 package com.egglytics.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import com.egglytics.domain.model.SaleLine
+import java.text.NumberFormat
+import java.util.Locale
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -47,6 +42,7 @@ internal fun SaleRoute(
 ) {
     val saleUi by saleViewModel.uiState.collectAsStateWithLifecycle()
     SaleScreen(
+        businessName = session.business.name,
         currency = session.business.currency,
         activePrices = activePrices,
         state = saleUi,
@@ -66,8 +62,10 @@ internal fun SaleRoute(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SaleScreen(
+    businessName: String,
     currency: String,
     activePrices: Map<EggClassification, ActivePriceResult>,
     state: SaleUiState,
@@ -81,187 +79,162 @@ fun SaleScreen(
     onMarkSaleDelivered: (String) -> Unit,
     onVoidSale: (ObservedSale, String) -> Unit,
 ) {
-    val activePrice = activePrices[state.form.saleClassification] as? ActivePriceResult.Found
-    val parsedBuckets = state.form.saleBucketsInput.trim().toLongOrNull()?.takeIf { it > 0L }
+    val form = state.form
+    val shape = RoundedCornerShape(16.dp)
+    val numbers = remember { NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CO")) }
+    val price = (activePrices[form.saleClassification] as? ActivePriceResult.Found)?.price?.pricePerBucket
+    val count = form.saleBucketsInput.trim().toLongOrNull()
+    val eggs = count?.takeIf { it > 0 && it <= Long.MAX_VALUE / SaleLine.EGGS_PER_BUCKET }
+        ?.times(SaleLine.EGGS_PER_BUCKET)
+    val total = if (eggs != null && price != null && price > 0 && count != null && count <= Long.MAX_VALUE / price) count * price else null
+    val method = state.paymentMethods.find { it.id == form.selectedMethodId }
+    var history by rememberSaveable { mutableStateOf(false) }
     var saleToVoid by remember { mutableStateOf<ObservedSale?>(null) }
 
-    val pendingVoidTarget = saleToVoid
-    if (pendingVoidTarget != null) {
-        VoidReasonDialog(
-            title = "Anular venta",
-            description = "Se anularán la venta y su cobro completo en un único lote de reversos.",
-            onDismiss = { saleToVoid = null },
-            onConfirm = { reason ->
-                saleToVoid = null
-                onVoidSale(pendingVoidTarget, reason)
-            },
-        )
-    }
-
-    Scaffold { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = "Ventas",
-                        style = MaterialTheme.typography.headlineSmall,
-                    )
-                    OutlinedButton(onClick = onBack) {
-                        Text("Volver")
+    MaterialTheme(colorScheme = egglyticsColors) {
+        saleToVoid?.let { target ->
+            VoidReasonDialog(
+                title = "Anular venta",
+                description = "Se anularán la venta y su cobro de ${numbers.format(target.sale.total)} $currency.",
+                onDismiss = { saleToVoid = null },
+                onConfirm = { reason ->
+                    saleToVoid = null
+                    onVoidSale(target, reason)
+                },
+            )
+        }
+        Scaffold(containerColor = egglyticsColors.background) { insets ->
+            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Ventas", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(businessName, style = MaterialTheme.typography.bodySmall)
                     }
+                    TextButton(onClick = onBack) { Text("Volver") }
                 }
-            }
-
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            EggClassification.entries.forEach { classification ->
-                                FilterChip(
-                                    selected = state.form.saleClassification == classification,
-                                    onClick = { onSaleClassificationChange(classification) },
-                                    label = { Text(classification.name) },
-                                )
-                            }
-                        }
-                        val priceLabel = if (activePrice != null) {
-                            "Precio vigente ${state.form.saleClassification.name}: ${activePrice.price.pricePerBucket} $currency / cubeta"
-                        } else {
-                            "Sin precio vigente para ${state.form.saleClassification.name}"
-                        }
-                        Text(
-                            text = priceLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        Text(
-                            text = "Forma de pago",
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                        if (state.paymentMethods.isEmpty()) {
-                            Text(
-                                text = "No hay formas de pago activas.",
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                state.paymentMethods.forEach { method ->
-                                    FilterChip(
-                                        selected = state.form.selectedMethodId == method.id,
-                                        onClick = { onPaymentMethodSelect(method.id) },
-                                        label = { Text(method.name) },
-                                    )
+                TabRow(selectedTabIndex = if (history) 1 else 0, containerColor = egglyticsColors.background) {
+                    Tab(selected = !history, onClick = { history = false }, text = { Text("Nueva venta") })
+                    Tab(selected = history, onClick = { history = true }, text = { Text("Historial (${state.sales.size})") })
+                }
+                if (history) {
+                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        state.salesError?.let { item { Text(it, color = egglyticsColors.error) } }
+                        if (state.sales.isEmpty() && state.salesError == null) {
+                            item {
+                                Surface(modifier = Modifier.fillMaxWidth(), shape = shape) {
+                                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text("Sin ventas registradas", style = MaterialTheme.typography.titleMedium)
+                                        Button(onClick = { history = false }) { Text("Registrar primera venta") }
+                                    }
                                 }
                             }
                         }
-                        OutlinedTextField(
-                            value = state.form.saleDateInput,
-                            onValueChange = onSaleDateChange,
-                            label = { Text("Fecha venta (YYYY-MM-DD)") },
-                            singleLine = true,
-                            enabled = !state.form.isSubmitting,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = state.form.saleBucketsInput,
-                            onValueChange = onSaleBucketsChange,
-                            label = { Text("Cubetas") },
-                            singleLine = true,
-                            enabled = !state.form.isSubmitting,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = state.form.saleNoteInput,
-                            onValueChange = onSaleNoteChange,
-                            label = { Text("Nota venta (opcional)") },
-                            singleLine = true,
-                            enabled = !state.form.isSubmitting,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        if (activePrice != null && parsedBuckets != null) {
-                            val totalPreview = parsedBuckets * activePrice.price.pricePerBucket
-                            Text(
-                                text = "Total a cobrar: $totalPreview $currency (${parsedBuckets * 30L} huevos)",
-                                style = MaterialTheme.typography.bodyMedium,
+                        items(state.sales, key = { it.sale.id }) { item ->
+                            val voidReason = state.reversedSaleReasons[item.sale.id]
+                            SaleRowCard(
+                                observed = item,
+                                paidAmount = state.paidAmountBySaleId[item.sale.id] ?: 0L,
+                                paymentMethods = state.paymentMethodsBySaleId[item.sale.id].orEmpty(),
+                                currency = currency,
+                                numbers = numbers,
+                                voidReason = voidReason,
+                                canVoid = state.canVoid && voidReason == null,
+                                eligibility = state.saleReversalEligibility[item.sale.id],
+                                isVoiding = item.sale.id in state.voidingSaleIds,
+                                onMarkDelivered = { onMarkSaleDelivered(item.sale.id) },
+                                onVoidClick = { saleToVoid = item },
                             )
                         }
-                        if (state.form.saleError != null) {
-                            Text(
-                                text = state.form.saleError,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
+                    }
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            OutlinedTextField(
+                                value = form.saleDateInput, onValueChange = onSaleDateChange,
+                                label = { Text("Fecha de venta (YYYY-MM-DD)") }, singleLine = true,
+                                enabled = !form.isSubmitting, modifier = Modifier.fillMaxWidth(), shape = shape,
                             )
                         }
-                        Button(
-                            onClick = onSubmitSale,
-                            enabled = !state.form.isSubmitting && state.paymentMethods.isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(if (state.form.isSubmitting) "Guardando..." else "Guardar venta")
+                        item {
+                            SaleSection("Clasificación") {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    EggClassification.entries.forEach { classification ->
+                                        FilterChip(selected = form.saleClassification == classification,
+                                            onClick = { onSaleClassificationChange(classification) },
+                                            enabled = !form.isSubmitting, label = { Text(classification.name) })
+                                    }
+                                }
+                                Text(price?.let { "${numbers.format(it)} $currency por cubeta" }
+                                    ?: "Sin precio vigente para ${form.saleClassification.name}",
+                                    color = if (price == null) egglyticsColors.error else egglyticsColors.primary)
+                                HorizontalDivider()
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedTextField(value = form.saleBucketsInput, onValueChange = onSaleBucketsChange,
+                                        label = { Text("Cubetas") }, singleLine = true, enabled = !form.isSubmitting,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                                    val stepCount = if (form.saleBucketsInput.isBlank()) 0L else count
+                                    IconButton(onClick = { stepCount?.let { onSaleBucketsChange((it - 1).toString()) } },
+                                        enabled = !form.isSubmitting && stepCount != null && stepCount > 0,
+                                        modifier = Modifier.semantics { contentDescription = "Restar una cubeta" }) { Text("−") }
+                                    IconButton(onClick = { stepCount?.let { onSaleBucketsChange((it + 1).toString()) } },
+                                        enabled = !form.isSubmitting && stepCount != null && stepCount in 0 until Long.MAX_VALUE,
+                                        modifier = Modifier.semantics { contentDescription = "Sumar una cubeta" }) { Text("+") }
+                                }
+                                Text(eggs?.let { "${numbers.format(it)} huevos" } ?: "1 cubeta = ${SaleLine.EGGS_PER_BUCKET} huevos",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        item {
+                            SaleSection("Forma de pago") {
+                                if (state.paymentMethods.isEmpty()) Text("No hay formas de pago activas.", color = egglyticsColors.error)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    state.paymentMethods.forEach { option ->
+                                        FilterChip(selected = option.id == form.selectedMethodId, enabled = !form.isSubmitting,
+                                            onClick = { onPaymentMethodSelect(option.id) }, label = { Text(option.name) })
+                                    }
+                                }
+                                OutlinedTextField(value = form.saleNoteInput, onValueChange = onSaleNoteChange,
+                                    label = { Text("Nota de venta (opcional)") }, enabled = !form.isSubmitting,
+                                    modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                        item {
+                            Surface(color = egglyticsColors.secondaryContainer, shape = shape) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("Total a cobrar", style = MaterialTheme.typography.titleMedium)
+                                    Text(total?.let { "${numbers.format(it)} $currency" } ?: "—",
+                                        style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                                    if (total != null) Text("${numbers.format(count)} × ${numbers.format(price)} $currency · ${form.saleClassification.name}")
+                                    if (method != null) Text("Cobro completo por ${method.name} · Entrega pendiente",
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                        item {
+                            if (count != null && count > 0 && (eggs == null || (price != null && total == null))) {
+                                Text("La cantidad excede el límite de la venta.", color = egglyticsColors.error)
+                            }
+                            form.saleError?.let { Text(it, color = egglyticsColors.error) }
+                            state.salesError?.let { Text(it, color = egglyticsColors.error) }
+                            Button(onClick = onSubmitSale, enabled = !form.isSubmitting && method != null && total != null,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = shape) {
+                                Text(if (form.isSubmitting) "Guardando…" else "Guardar venta")
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
 
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Ventas (${state.sales.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                if (state.salesError != null) {
-                    Text(
-                        text = state.salesError,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            if (state.sales.isEmpty()) {
-                item {
-                    Text(
-                        text = "Sin ventas registradas.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            } else {
-                items(state.sales, key = { it.sale.id }) { item ->
-                    val voidReason = state.reversedSaleReasons[item.sale.id]
-                    SaleRowCard(
-                        observed = item,
-                        paidAmount = state.paidAmountBySaleId[item.sale.id] ?: 0L,
-                        currency = currency,
-                        voidReason = voidReason,
-                        canVoid = state.canVoid && voidReason == null,
-                        eligibility = state.saleReversalEligibility[item.sale.id],
-                        isVoiding = item.sale.id in state.voidingSaleIds,
-                        onMarkDelivered = { onMarkSaleDelivered(item.sale.id) },
-                        onVoidClick = { saleToVoid = item },
-                    )
-                }
-            }
+@Composable
+private fun SaleSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Surface(shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            content()
         }
     }
 }
@@ -270,6 +243,8 @@ fun SaleScreen(
 private fun SaleRowCard(
     observed: ObservedSale,
     paidAmount: Long,
+    paymentMethods: List<String>,
+    numbers: NumberFormat,
     currency: String,
     voidReason: String?,
     canVoid: Boolean,
@@ -279,19 +254,19 @@ private fun SaleRowCard(
     onVoidClick: () -> Unit,
 ) {
     val sale = observed.sale
-    val line = sale.lines.first()
     val deliveryText = when {
         voidReason != null -> "Anulada"
-        sale.deliveryStatus == DeliveryStatus.PENDING -> "Pendiente entrega"
+        sale.deliveryStatus == DeliveryStatus.PENDING -> "Pendiente de entrega"
         else -> "Entregada"
     }
     val paymentText = when {
         voidReason != null -> "Cobro anulado"
-        paidAmount > 0L -> "Pagado: $paidAmount $currency"
+        paidAmount > 0L -> listOf("Pagado: ${numbers.format(paidAmount)} $currency")
+            .plus(paymentMethods).joinToString(" · ")
         else -> "Sin pago registrado"
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -303,15 +278,19 @@ private fun SaleRowCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "${OperationalDate.format(sale.fechaOperativa)} · $deliveryText",
+                    text = OperationalDate.format(sale.fechaOperativa),
                     style = MaterialTheme.typography.titleSmall,
                 )
-                SyncStatusBadge(isPendingWrite = observed.isPendingWrite)
+                Row {
+                    Text("Sincronización · ", style = MaterialTheme.typography.bodySmall)
+                    SyncStatusBadge(isPendingWrite = observed.isPendingWrite)
+                }
             }
-            Text(
-                text = "${line.classification.name}: ${line.buckets} cubetas (${line.eggs} huevos) · Total: ${sale.total} $currency",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Text("${numbers.format(sale.total)} $currency", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            sale.lines.forEach { line ->
+                Text("${line.classification.name} · ${numbers.format(line.buckets)} cubetas · ${numbers.format(line.eggs)} huevos")
+            }
+            Text("Entrega: $deliveryText", style = MaterialTheme.typography.bodyMedium)
             Text(
                 text = paymentText,
                 style = MaterialTheme.typography.bodySmall,

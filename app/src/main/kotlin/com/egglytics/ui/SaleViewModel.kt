@@ -56,6 +56,7 @@ data class SaleUiState(
     val paymentMethods: List<PaymentMethod> = emptyList(),
     val sales: List<ObservedSale> = emptyList(),
     val paidAmountBySaleId: Map<String, Long> = emptyMap(),
+    val paymentMethodsBySaleId: Map<String, List<String>> = emptyMap(),
     val reversedSaleReasons: Map<String, String> = emptyMap(),
     val saleReversalEligibility: Map<String, SaleReversalEligibility> = emptyMap(),
     val voidingSaleIds: Set<String> = emptySet(),
@@ -190,12 +191,13 @@ class SaleViewModel @Inject constructor(
             .filter { it.targetCollection == ReversalTargetCollection.SALES }
             .associate { it.targetId to it.reason }
 
-        val paidAmounts = paymentsBySale.mapValues { (_, list) ->
+        val activePayments = paymentsBySale.mapValues { (_, list) ->
             list.asSequence()
                 .map { it.payment }
                 .filter { it.id !in reversedPaymentIds && it.type == PaymentType.PAYMENT }
-                .sumOf { it.amount }
+                .toList()
         }
+        val methodNames = methods.associate { it.id to it.name }
         val eligibilityMap = salesRes.first.associate { observed ->
             val saleId = observed.sale.id
             val salePayments = paymentsBySale[saleId].orEmpty()
@@ -218,7 +220,10 @@ class SaleViewModel @Inject constructor(
             form = form.copy(selectedMethodId = effectiveMethodId),
             paymentMethods = methods,
             sales = salesRes.first,
-            paidAmountBySaleId = paidAmounts,
+            paidAmountBySaleId = activePayments.mapValues { (_, payments) -> payments.sumOf { it.amount } },
+            paymentMethodsBySaleId = activePayments.mapValues { (_, payments) ->
+                payments.map { methodNames[it.methodId] ?: it.methodId }.distinct()
+            },
             reversedSaleReasons = reversedSaleReasons,
             saleReversalEligibility = eligibilityMap,
             voidingSaleIds = signals.voidingIds,
