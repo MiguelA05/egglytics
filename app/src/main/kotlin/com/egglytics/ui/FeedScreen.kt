@@ -303,17 +303,19 @@ private fun historyEntries(state: FeedUiState, currency: String): List<FeedHisto
         val method = state.paymentMethods.find { it.id == p.methodId }?.name ?: p.methodId
         add(FeedHistoryEntry(p.id, p.fechaOperativa, p.createdAt, ReversalTargetCollection.FEED_PURCHASES,
             p.ingredient, FeedFormMode.PURCHASE, "+${p.totalKg} kg · ${money.format(p.totalCost)} $currency",
-            listOfNotNull("${p.bags} bultos · $method", p.supplier?.takeIf { it.isNotBlank() }).joinToString(" · "), p.note, pending))
+            listOfNotNull("${bagLabel(p.bags)} · $method", p.supplier?.takeIf { it.isNotBlank() }).joinToString(" · "), p.note, pending))
     }
     state.depletions.forEach { (d, pending) ->
         add(FeedHistoryEntry(d.id, d.fechaOperativa, d.createdAt, ReversalTargetCollection.FEED_DEPLETIONS,
-            d.ingredient, FeedFormMode.DEPLETION, "−${d.kg} kg · ${d.bags} bultos", null, d.note, pending))
+            d.ingredient, FeedFormMode.DEPLETION, "−${d.kg} kg · ${bagLabel(d.bags)}", null, d.note, pending))
     }
     state.losses.forEach { (l, pending) ->
         add(FeedHistoryEntry(l.id, l.fechaOperativa, l.createdAt, ReversalTargetCollection.FEED_LOSSES,
             l.ingredient, FeedFormMode.LOSS, "−${l.kg} kg", "${l.type.label()} · ${l.reason}", l.note, pending))
     }
 }.sortedWith(compareByDescending<FeedHistoryEntry> { it.date }.thenByDescending { it.created }.thenBy { it.key })
+
+private fun bagLabel(count: Long) = if (count == 1L) "1 bulto" else "$count bultos"
 
 private fun FeedFormMode.label() = when (this) {
     FeedFormMode.PURCHASE -> "Compra"
