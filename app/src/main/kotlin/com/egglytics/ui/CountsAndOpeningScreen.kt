@@ -263,11 +263,14 @@ private fun LazyListScope.closingHistory(state: CountsAndOpeningUiState, currenc
             )
         }
         val countsById = state.counts.associateBy { it.id }
-        val allExpectedKeys = FeedIngredient.entries.map { it.code } + state.paymentMethods.map { it.id }
+        val labels = FeedIngredient.entries.associate {
+            it.code to if (it == FeedIngredient.CONCENTRATE) "Concentrado" else "Salvado de maíz"
+        } + state.paymentMethods.associate { it.id to it.name }
+        fun label(key: String) = labels[key] ?: key
         items(state.closings, key = { "cl_${it.id}" }) { closing ->
             val linkedCounts = closing.countIds.mapNotNull { countsById[it] }
             val countedKeys = linkedCounts.flatMap { it.items.keys }.toSet()
-            val omittedKeys = allExpectedKeys.filter { it !in countedKeys }
+            val omittedKeys = labels.keys.filter { it !in countedKeys }
             val s = closing.summary
             Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                 Column(
@@ -293,11 +296,11 @@ private fun LazyListScope.closingHistory(state: CountsAndOpeningUiState, currenc
                         Text("Cierre completo (${countedKeys.size} claves contadas)", style = MaterialTheme.typography.bodySmall)
                     } else {
                         Text(
-                            text = "Cierre parcial · Contadas: ${countedKeys.joinToString(", ").ifEmpty { "ninguna" }}",
+                            text = "Cierre parcial · Contadas: ${countedKeys.joinToString(", ", transform = ::label).ifEmpty { "ninguna" }}",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
-                            text = "Omitidas: ${omittedKeys.joinToString(", ")}",
+                            text = "Omitidas: ${omittedKeys.joinToString(", ", transform = ::label)}",
                             color = MaterialTheme.colorScheme.tertiary,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -306,7 +309,7 @@ private fun LazyListScope.closingHistory(state: CountsAndOpeningUiState, currenc
                         count.items.forEach { (key, item) ->
                             val reasonTxt = item.reason?.let { " · Motivo: $it" }.orEmpty()
                             Text(
-                                text = "  $key: contado ${item.physical} / esp. ${item.expected} (dif ${item.difference}$reasonTxt)",
+                                text = "${label(key)}: contado ${item.physical} / esperado ${item.expected} (diferencia ${item.difference}$reasonTxt)",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
