@@ -59,6 +59,7 @@ data class ExpensesUiState(
     val expenses: List<ObservedExpense> = emptyList(),
     val withdrawals: List<ObservedWithdrawal> = emptyList(),
     val reversedReasons: Map<String, String> = emptyMap(),
+    val historyReady: Boolean = false,
     val error: String? = null,
 )
 
@@ -102,8 +103,10 @@ class ExpensesViewModel @Inject constructor(
     }
 
     private val observedReversals = activeUid.flatMapLatest { uid ->
-        if (uid == null) flowOf(emptyList<ObservedReversal>())
-        else reversalRepository.observeReversals().catch { emit(emptyList()) }
+        if (uid == null) flowOf(emptyList<ObservedReversal>() to (null as String?))
+        else reversalRepository.observeReversals()
+            .map { it to (null as String?) }
+            .catch { emit(emptyList<ObservedReversal>() to (it.localizedMessage ?: "Error al consultar anulaciones.")) }
     }
 
     private val catalogs = combine(
@@ -113,7 +116,7 @@ class ExpensesViewModel @Inject constructor(
         isAdminFlow,
         writeError,
     ) { cats, methods, reversals, isAdmin, wErr ->
-        ExpensesCatalogBundle(cats, methods, reversals, isAdmin, wErr)
+        ExpensesCatalogBundle(cats, methods, reversals.first, isAdmin, wErr, reversals.second)
     }
 
     val uiState: StateFlow<ExpensesUiState> = combine(
@@ -146,7 +149,8 @@ class ExpensesViewModel @Inject constructor(
             expenses = expenses,
             withdrawals = withdrawals,
             reversedReasons = reversedReasons,
-            error = listOfNotNull(bundle.writeError, expErr, wdrErr).firstOrNull(),
+            historyReady = activeUid.value != null && expErr == null && wdrErr == null && bundle.reversalError == null,
+            error = listOfNotNull(expErr, wdrErr, bundle.reversalError, bundle.writeError).firstOrNull(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -270,4 +274,5 @@ private data class ExpensesCatalogBundle(
     val reversals: List<ObservedReversal>,
     val isAdmin: Boolean,
     val writeError: String?,
+    val reversalError: String?,
 )
