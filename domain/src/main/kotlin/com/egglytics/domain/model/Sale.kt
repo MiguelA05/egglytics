@@ -49,10 +49,10 @@ data class SaleLine(
             return SaleLine(
                 classification = classification,
                 buckets = buckets,
-                eggs = buckets * EGGS_PER_BUCKET,
+                eggs = Math.multiplyExact(buckets, EGGS_PER_BUCKET),
                 listPrice = listPrice,
                 unitPrice = unitPrice,
-                subtotal = buckets * unitPrice,
+                subtotal = Math.multiplyExact(buckets, unitPrice),
             )
         }
     }
@@ -81,10 +81,11 @@ data class Sale(
     val deliveredAt: Instant? = null,
     val deliveredBy: String? = null,
     val note: String? = null,
+    val customerName: String? = null,
 ) {
     init {
         require(lines.isNotEmpty()) { "La venta debe tener al menos una línea" }
-        val expectedTotal = lines.sumOf { it.subtotal }
+        val expectedTotal = lines.fold(0L) { sum, line -> Math.addExact(sum, line.subtotal) }
         require(total > 0L && total == expectedTotal) {
             "El total ($total) debe coincidir con la suma de subtotales ($expectedTotal)"
         }

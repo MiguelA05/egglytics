@@ -8,7 +8,6 @@ import com.egglytics.domain.model.Payment
 import com.egglytics.domain.model.PaymentType
 import com.egglytics.domain.model.Sale
 import com.egglytics.domain.model.SaleLine
-import com.egglytics.domain.model.SingleLineSaleRequest
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -135,20 +134,9 @@ class FirebaseSaleRepository @Inject constructor(
             return
         }
 
-        val now = Instant.now(clock)
-        val sale = Sale.createSingleLinePending(
-            SingleLineSaleRequest(
-                id = request.saleId,
-                fechaOperativa = request.fechaOperativa,
-                businessStartDate = request.businessStartDate,
-                createdAt = now,
-                createdBy = uid,
-                classification = request.classification,
-                buckets = request.buckets,
-                activePrice = request.activePrice,
-                note = request.note,
-            ),
-        )
+        val sale = request.sale
+        if (uid != sale.createdBy) return onWriteError("La sesión cambió. Vuelve a registrar la venta.")
+        val now = sale.createdAt
         val payment = Payment.forFullSalePayment(
             id = request.paymentId,
             sale = sale,
@@ -182,6 +170,8 @@ class FirebaseSaleRepository @Inject constructor(
             salePayload["note"] = sale.note.orEmpty()
         }
 
+        sale.customerName?.let { salePayload["customerName"] = it }
+
         val paymentPayload = hashMapOf<String, Any>(
             "fechaOperativa" to fechaStr,
             "createdAt" to createdAtTs,
@@ -196,8 +186,7 @@ class FirebaseSaleRepository @Inject constructor(
             paymentPayload["note"] = payment.note.orEmpty()
         }
 
-        val summaryText = "Venta $fechaStr · ${request.classification.name} " +
-            "${request.buckets} cubetas (${sale.total})"
+        val summaryText = "Venta $fechaStr · " + sale.lines.joinToString { "${it.classification}: ${it.buckets} cubetas" } + " (${sale.total})"
         receiptStore.upsert(
             SubmissionReceipt(
                 submissionId = sale.id,
@@ -313,6 +302,7 @@ private fun DocumentSnapshot.toSaleOrNull(): Sale? {
             deliveryStatus = deliveryStatus,
             deliveredAt = getTimestamp("deliveredAt")?.toDate()?.toInstant(),
             deliveredBy = getString("deliveredBy"),
+            customerName = getString("customerName"),
             note = getString("note"),
         )
     }.getOrNull()

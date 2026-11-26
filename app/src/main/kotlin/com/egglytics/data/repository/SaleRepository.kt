@@ -1,13 +1,10 @@
 package com.egglytics.data.repository
 
-import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.Payment
-import com.egglytics.domain.model.Price
 import com.egglytics.domain.model.Sale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import java.time.LocalDate
 
 data class ObservedSale(
     val sale: Sale,
@@ -20,15 +17,9 @@ data class ObservedSalePayment(
 )
 
 data class SaleWithPaymentRequest(
-    val saleId: String,
+    val sale: Sale,
     val paymentId: String,
-    val fechaOperativa: LocalDate,
-    val businessStartDate: LocalDate,
-    val classification: EggClassification,
-    val buckets: Long,
-    val activePrice: Price,
     val methodId: String,
-    val note: String?,
 )
 
 interface SaleRepository {

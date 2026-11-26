@@ -144,7 +144,7 @@ fun ExpensesScreen(
                                 FilterChip(selected = expense, onClick = { onModeChange(ExpenseFormMode.EXPENSE) }, label = { Text("Gasto operativo") })
                                 FilterChip(selected = !expense, onClick = { onModeChange(ExpenseFormMode.WITHDRAWAL) }, label = { Text("Retiro personal") })
                             }
-                            CaptureField("Fecha operativa (YYYY-MM-DD)", form.dateInput, onDateChange)
+                            CalendarField("Fecha operativa", form.dateInput, onDateChange)
                             CaptureField("Monto ($currency)", form.amountInput, onAmountChange, numeric = true)
                         }
                     }

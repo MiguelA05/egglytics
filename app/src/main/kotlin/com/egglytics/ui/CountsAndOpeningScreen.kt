@@ -106,8 +106,7 @@ fun CountsAndOpeningScreen(
                                 state.openings.isNotEmpty() -> "Apertura confirmada · ${state.openings.size} saldos"
                                 else -> "Sin apertura confirmada"
                             })
-                            OutlinedTextField(shape = fieldShape, value = form.dateInput, onValueChange = onDateChange,
-                                label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                            CalendarField("Fecha operativa", form.dateInput, onDateChange)
                             form.lastCountedSummary?.let { Text(it, color = egglyticsColors.primary) }
                         }
                     }

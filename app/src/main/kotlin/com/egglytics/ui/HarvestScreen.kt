@@ -110,11 +110,7 @@ fun HarvestScreen(
             } else {
                 LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
-                        OutlinedTextField(
-                            value = state.form.harvestDateInput, onValueChange = onHarvestDateChange,
-                            label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth(), shape = fieldShape,
-                        )
+                        CalendarField("Fecha operativa", state.form.harvestDateInput, onHarvestDateChange)
                     }
                     item {
                         SectionPanel("Huevos por clasificación") {

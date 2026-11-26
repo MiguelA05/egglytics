@@ -115,10 +115,8 @@ fun CashScreen(
                         item {
                             SectionPanel("Periodo de análisis") {
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(shape = fieldShape, value = state.periodStartInput, onValueChange = onPeriodStartChange,
-                                        label = { Text("Desde") }, singleLine = true, modifier = Modifier.weight(1f))
-                                    OutlinedTextField(shape = fieldShape, value = state.periodEndInput, onValueChange = onPeriodEndChange,
-                                        label = { Text("Hasta") }, singleLine = true, modifier = Modifier.weight(1f))
+                                    CalendarField("Desde", state.periodStartInput, onPeriodStartChange, Modifier.weight(1f))
+                                    CalendarField("Hasta", state.periodEndInput, onPeriodEndChange, Modifier.weight(1f))
                                 }
                                 state.periodError?.let { Text(it, color = egglyticsColors.error) }
                             }

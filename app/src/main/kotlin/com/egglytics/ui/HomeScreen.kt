@@ -58,8 +58,7 @@ internal fun HomeRoute(
                     OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Valor (${session.business.currency})") },
                         singleLine = true, shape = fieldShape, enabled = !editor.saving,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                    OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Vigente desde (YYYY-MM-DD)") },
-                        singleLine = true, shape = fieldShape, enabled = !editor.saving)
+                    CalendarField("Vigente desde", date, { date = it }, enabled = !editor.saving)
                     editor.error?.let { Text(it, color = egglyticsColors.error) }
                 }
             },

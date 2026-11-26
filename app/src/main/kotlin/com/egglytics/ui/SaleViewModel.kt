@@ -18,7 +18,9 @@ import com.egglytics.domain.model.PaymentMethod
 import com.egglytics.domain.model.PaymentType
 import com.egglytics.domain.model.ReversalTargetCollection
 import com.egglytics.domain.model.Sale
-import com.egglytics.domain.model.SingleLineSaleRequest
+import com.egglytics.domain.model.SaleLine
+import com.egglytics.domain.model.Harvest
+import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.usecase.ActivePriceResult
 import com.egglytics.domain.usecase.SaleReversalEligibility
 import com.egglytics.domain.usecase.SaleReversalValidationRequest
@@ -44,12 +46,26 @@ import javax.inject.Inject
 data class SaleFormState(
     val saleClassification: EggClassification = EggClassification.AA,
     val selectedMethodId: String? = null,
-    val saleBucketsInput: String = "",
+    val quantities: Map<EggClassification, String> = emptyMap(),
+    val customerName: String = "",
     val saleDateInput: String = "",
     val saleNoteInput: String = "",
     val isSubmitting: Boolean = false,
     val saleError: String? = null,
-)
+) {
+    val saleBucketsInput get() = quantities[saleClassification].orEmpty()
+
+    fun pricedLines(prices: Map<EggClassification, ActivePriceResult>): List<SaleLine> =
+        quantities.mapNotNull { (grade, raw) ->
+            if (raw.isBlank()) return@mapNotNull null
+            val count = raw.trim().toLongOrNull()
+            require(count != null && count >= 0) { "Cantidad inválida para $grade." }
+            if (count == 0L) return@mapNotNull null
+            val price = (prices[grade] as? ActivePriceResult.Found)?.price
+            require(price != null && price.classification == grade) { "No hay precio vigente para $grade." }
+            SaleLine.create(grade, count, price.pricePerBucket)
+        }
+}
 
 data class SaleUiState(
     val form: SaleFormState = SaleFormState(),
@@ -93,7 +109,8 @@ class SaleViewModel @Inject constructor(
                             pendingLocalSaleId.value = null
                             formState.update { current ->
                                 current.copy(
-                                    saleBucketsInput = "",
+                                    quantities = emptyMap(),
+                                    customerName = "",
                                     saleNoteInput = "",
                                     isSubmitting = false,
                                     saleError = null,
@@ -260,7 +277,11 @@ class SaleViewModel @Inject constructor(
     }
 
     fun onSaleBucketsChange(value: String) {
-        formState.update { it.copy(saleBucketsInput = value, saleError = null) }
+        formState.update { it.copy(quantities = it.quantities + (it.saleClassification to value), saleError = null) }
+    }
+
+    fun onCustomerNameChange(value: String) {
+        formState.update { it.copy(customerName = value) }
     }
 
     fun onSaleDateChange(value: String) {
@@ -288,50 +309,22 @@ class SaleViewModel @Inject constructor(
             return
         }
 
-        val bucketsRaw = state.saleBucketsInput.trim()
-        val buckets = bucketsRaw.toLongOrNull()
-        if (buckets == null || buckets <= 0L) {
-            formState.update { it.copy(saleError = "Ingresa una cantidad válida de cubetas (> 0).") }
-            return
-        }
-
-        val activePriceResult = activePrices[state.saleClassification]
-        if (activePriceResult !is ActivePriceResult.Found) {
-            formState.update {
-                it.copy(saleError = "No hay precio vigente para ${state.saleClassification.name}.")
-            }
-            return
-        }
-
         val methodId = state.selectedMethodId ?: currentUi.paymentMethods.firstOrNull()?.id
         if (methodId.isNullOrBlank() || currentUi.paymentMethods.none { it.id == methodId }) {
             formState.update { it.copy(saleError = "Selecciona una forma de pago activa.") }
             return
         }
 
-        val validationError = runCatching {
-            val previewSale = Sale.createSingleLinePending(
-                SingleLineSaleRequest(
-                    id = saleId,
-                    fechaOperativa = parsedDate,
-                    businessStartDate = session.business.startDate,
-                    createdAt = clock.instant(),
-                    createdBy = session.uid,
-                    classification = state.saleClassification,
-                    buckets = buckets,
-                    activePrice = activePriceResult.price,
-                    note = state.saleNoteInput,
-                ),
-            )
-            Payment.forFullSalePayment(
-                id = paymentId,
-                sale = previewSale,
-                methodId = methodId,
-            )
-        }.exceptionOrNull()
-
-        if (validationError != null) {
-            formState.update { it.copy(saleError = validationError.message ?: "Venta inválida.") }
+        val sale = runCatching {
+            Harvest.validateOperationalDate(parsedDate, session.business.startDate)
+            val lines = state.pricedLines(activePrices)
+            require(lines.isNotEmpty()) { "Ingresa una cantidad válida de cubetas (> 0)." }
+            Sale(id = saleId, fechaOperativa = parsedDate, createdAt = clock.instant(), createdBy = session.uid,
+                lines = lines, total = lines.fold(0L) { sum, line -> Math.addExact(sum, line.subtotal) },
+                deliveryStatus = DeliveryStatus.PENDING, note = state.saleNoteInput.trim().ifEmpty { null },
+                customerName = state.customerName.trim().ifEmpty { null })
+        }.getOrElse { error ->
+            formState.update { it.copy(saleError = error.message ?: "Venta inválida.") }
             return
         }
 
@@ -340,17 +333,7 @@ class SaleViewModel @Inject constructor(
         formState.update { it.copy(isSubmitting = true, saleError = null) }
 
         saleRepository.createPendingSaleWithFullPayment(
-            request = SaleWithPaymentRequest(
-                saleId = saleId,
-                paymentId = paymentId,
-                fechaOperativa = parsedDate,
-                businessStartDate = session.business.startDate,
-                classification = state.saleClassification,
-                buckets = buckets,
-                activePrice = activePriceResult.price,
-                methodId = methodId,
-                note = state.saleNoteInput,
-            ),
+            request = SaleWithPaymentRequest(sale, paymentId, methodId),
             onWriteError = { err ->
                 if (pendingLocalSaleId.value == saleId) {
                     pendingLocalSaleId.value = null

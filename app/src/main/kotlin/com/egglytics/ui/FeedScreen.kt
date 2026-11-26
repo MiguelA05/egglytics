@@ -127,7 +127,7 @@ fun FeedScreen(
                                     Choices(FeedFormMode.entries, form.mode, onModeChange) { it.label() }
                                     Text("Ingrediente", style = MaterialTheme.typography.labelLarge)
                                     Choices(FeedIngredient.entries, form.ingredient, onIngredientChange, ::ingredientLabel)
-                                    CaptureField("Fecha operativa (YYYY-MM-DD)", form.dateInput, onDateChange)
+                                    CalendarField("Fecha operativa", form.dateInput, onDateChange)
                                 }
                             }
                             item {
@@ -184,8 +184,8 @@ fun FeedScreen(
                             item {
                                 SectionPanel("Periodo de consumo") {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        CaptureField("Desde", form.periodStartInput, onPeriodStartChange, Modifier.weight(1f))
-                                        CaptureField("Hasta", form.periodEndInput, onPeriodEndChange, Modifier.weight(1f))
+                                        CalendarField("Desde", form.periodStartInput, onPeriodStartChange, Modifier.weight(1f))
+                                        CalendarField("Hasta", form.periodEndInput, onPeriodEndChange, Modifier.weight(1f))
                                     }
                                 }
                             }

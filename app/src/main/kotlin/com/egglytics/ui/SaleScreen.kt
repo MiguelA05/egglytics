@@ -58,6 +58,7 @@ internal fun SaleRoute(
         onPaymentMethodSelect = saleViewModel::onPaymentMethodSelect,
         onSaleBucketsChange = saleViewModel::onSaleBucketsChange,
         onSaleDateChange = saleViewModel::onSaleDateChange,
+        onCustomerNameChange = saleViewModel::onCustomerNameChange,
         onSaleNoteChange = saleViewModel::onSaleNoteChange,
         onSubmitSale = {
             saleViewModel.submitSale(session, activePrices)
@@ -81,6 +82,7 @@ fun SaleScreen(
     onPaymentMethodSelect: (String) -> Unit,
     onSaleBucketsChange: (String) -> Unit,
     onSaleDateChange: (String) -> Unit,
+    onCustomerNameChange: (String) -> Unit,
     onSaleNoteChange: (String) -> Unit,
     onSubmitSale: () -> Unit,
     onMarkSaleDelivered: (String) -> Unit,
@@ -92,7 +94,9 @@ fun SaleScreen(
     val count = form.saleBucketsInput.trim().toLongOrNull()
     val eggs = count?.takeIf { it > 0 && it <= Long.MAX_VALUE / SaleLine.EGGS_PER_BUCKET }
         ?.times(SaleLine.EGGS_PER_BUCKET)
-    val total = if (eggs != null && price != null && price > 0 && count != null && count <= Long.MAX_VALUE / price) count * price else null
+    val preview = runCatching { form.pricedLines(activePrices) }
+    val lines = preview.getOrDefault(emptyList())
+    val total = runCatching { lines.takeIf { it.isNotEmpty() }?.fold(0L) { sum, line -> Math.addExact(sum, line.subtotal) } }.getOrNull()
     val method = state.paymentMethods.find { it.id == form.selectedMethodId }
     var history by rememberSaveable { mutableStateOf(false) }
     var saleToVoid by remember { mutableStateOf<ObservedSale?>(null) }
@@ -149,19 +153,16 @@ fun SaleScreen(
             } else {
                 LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
-                        OutlinedTextField(
-                            value = form.saleDateInput, onValueChange = onSaleDateChange,
-                            label = { Text("Fecha de venta (YYYY-MM-DD)") }, singleLine = true,
-                            enabled = !form.isSubmitting, modifier = Modifier.fillMaxWidth(), shape = fieldShape,
-                        )
+                        CalendarField("Fecha de venta", form.saleDateInput, onSaleDateChange, enabled = !form.isSubmitting)
                     }
                     item {
-                        SectionPanel("Clasificación") {
+                        SectionPanel("Cubetas por clasificación") {
+                            Text("Selecciona cada clasificación para indicar sus cubetas.", style = MaterialTheme.typography.bodySmall)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 EggClassification.entries.forEach { classification ->
                                     FilterChip(selected = form.saleClassification == classification,
                                         onClick = { onSaleClassificationChange(classification) },
-                                        enabled = !form.isSubmitting, label = { Text(classification.name) })
+                                        enabled = !form.isSubmitting, label = { Text(form.quantities[classification]?.takeIf { it.isNotBlank() && it != "0" }?.let { "${classification.name} · $it" } ?: classification.name) })
                                 }
                             }
                             Text(price?.let { "${numbers.format(it)} $currency por cubeta" }
@@ -193,6 +194,9 @@ fun SaleScreen(
                                         onClick = { onPaymentMethodSelect(option.id) }, label = { Text(option.name) })
                                 }
                             }
+                            OutlinedTextField(value = form.customerName, onValueChange = onCustomerNameChange,
+                                label = { Text("Comprador (opcional)") }, singleLine = true, enabled = !form.isSubmitting,
+                                shape = fieldShape, modifier = Modifier.fillMaxWidth())
                             OutlinedTextField(shape = fieldShape, value = form.saleNoteInput, onValueChange = onSaleNoteChange,
                                 label = { Text("Nota de venta (opcional)") }, enabled = !form.isSubmitting,
                                 modifier = Modifier.fillMaxWidth())
@@ -204,15 +208,18 @@ fun SaleScreen(
                                 Text("Total a cobrar", style = MaterialTheme.typography.titleMedium)
                                 Text(total?.let { "${numbers.format(it)} $currency" } ?: "—",
                                     style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                                if (total != null) Text("${numbers.format(count)} × ${numbers.format(price)} $currency · ${form.saleClassification.name}")
+                                lines.forEach { line ->
+                                    Text("${line.classification} · ${line.buckets} × ${numbers.format(line.unitPrice)} = ${numbers.format(line.subtotal)} $currency")
+                                }
                                 if (method != null) Text("Cobro completo por ${method.name} · Entrega pendiente",
                                     style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
                     item {
-                        if (count != null && count > 0 && (eggs == null || (price != null && total == null))) {
-                            Text("La cantidad excede el límite de la venta.", color = egglyticsColors.error)
+                        if (preview.isFailure || (lines.isNotEmpty() && total == null)) {
+                            val problem = preview.exceptionOrNull()
+                            Text(if (problem is IllegalArgumentException) problem.message.orEmpty() else "La cantidad excede el límite de la venta.", color = egglyticsColors.error)
                         }
                         form.saleError?.let { Text(it, color = egglyticsColors.error) }
                         state.salesError?.let { Text(it, color = egglyticsColors.error) }
@@ -275,6 +282,7 @@ private fun SaleRowCard(
                 }
             }
             Text("${numbers.format(sale.total)} $currency", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            sale.customerName?.let { Text("Comprador: $it") }
             sale.lines.forEach { line ->
                 Text("${line.classification.name} · ${numbers.format(line.buckets)} cubetas · ${numbers.format(line.eggs)} huevos")
             }

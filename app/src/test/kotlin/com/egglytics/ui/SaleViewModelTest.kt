@@ -114,11 +114,15 @@ class SaleViewModelTest {
 
         val activePrices = mapOf<EggClassification, ActivePriceResult>(
             EggClassification.AA to ActivePriceResult.Found(activeAaPrice),
+            EggClassification.A to ActivePriceResult.Found(activeAaPrice.copy(classification = EggClassification.A, pricePerBucket = 16000L)),
         )
 
         vm.onSaleClassificationChange(EggClassification.AA)
         vm.onPaymentMethodSelect("nequi")
         vm.onSaleBucketsChange("2")
+        vm.onSaleClassificationChange(EggClassification.A)
+        vm.onSaleBucketsChange("1")
+        vm.onCustomerNameChange(" Tienda Rosa ")
         vm.onSaleNoteChange("Contado Nequi")
         vm.submitSale(authSession, activePrices, "sale_aa_1", "pay_aa_1")
         advanceUntilIdle()
@@ -139,14 +143,16 @@ class SaleViewModelTest {
         val created = vm.uiState.value.sales.first()
         assertTrue(created.isPendingWrite)
         assertEquals(DeliveryStatus.PENDING, created.sale.deliveryStatus)
-        assertEquals(37000L, created.sale.total)
-        assertEquals(37000L, vm.uiState.value.paidAmountBySaleId["sale_aa_1"])
+        assertEquals(2, created.sale.lines.size)
+        assertEquals("Tienda Rosa", created.sale.customerName)
+        assertEquals(53000L, created.sale.total)
+        assertEquals(53000L, vm.uiState.value.paidAmountBySaleId["sale_aa_1"])
 
         vm.markSaleDelivered("sale_aa_1")
         advanceUntilIdle()
         val delivered = vm.uiState.value.sales.first().sale
         assertEquals(DeliveryStatus.DELIVERED, delivered.deliveryStatus)
-        assertEquals(37000L, delivered.total)
+        assertEquals(53000L, delivered.total)
         assertEquals(created.sale.lines, delivered.lines)
 
         vm.syncSession(SessionState.Unauthenticated)
@@ -336,9 +342,9 @@ class SaleViewModelTest {
             request: SaleWithPaymentRequest,
             onWriteError: (String) -> Unit,
         ) {
-            createdSaleIds.add(request.saleId)
+            createdSaleIds.add(request.sale.id)
             lastRequest = request
-            errorHandlers[request.saleId] = onWriteError
+            errorHandlers[request.sale.id] = onWriteError
             if (emitLocallyImmediately) {
                 emitLatestLocally(isPendingWrite = true)
             }
@@ -346,19 +352,7 @@ class SaleViewModelTest {
 
         fun emitLatestLocally(isPendingWrite: Boolean) {
             val req = lastRequest ?: return
-            val sale = Sale.createSingleLinePending(
-                SingleLineSaleRequest(
-                    id = req.saleId,
-                    fechaOperativa = req.fechaOperativa,
-                    businessStartDate = req.businessStartDate,
-                    createdAt = Instant.parse("2026-11-21T15:00:00Z"),
-                    createdBy = "operator_1",
-                    classification = req.classification,
-                    buckets = req.buckets,
-                    activePrice = req.activePrice,
-                    note = req.note,
-                ),
-            )
+            val sale = req.sale
             val payment = Payment.forFullSalePayment(req.paymentId, sale, req.methodId)
             salesFlow.value = listOf(ObservedSale(sale = sale, isPendingWrite = isPendingWrite)) + salesFlow.value
             paymentsFlow.value = paymentsFlow.value + (sale.id to listOf(payment))
