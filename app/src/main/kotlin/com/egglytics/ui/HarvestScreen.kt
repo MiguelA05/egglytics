@@ -1,7 +1,6 @@
 package com.egglytics.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
@@ -68,110 +67,92 @@ fun HarvestScreen(
     var harvestToVoid by remember { mutableStateOf<ObservedHarvest?>(null) }
 
     var showHistory by rememberSaveable { mutableStateOf(false) }
-    val shape = RoundedCornerShape(16.dp)
-    MaterialTheme(colorScheme = egglyticsColors) {
-        val target = harvestToVoid
-        if (target != null) {
-            VoidReasonDialog(
-                title = "Anular recolección",
-                description = "Se registrará un reverso para la recolección del ${OperationalDate.format(target.harvest.fechaOperativa)}.",
-                onDismiss = { harvestToVoid = null },
-                onConfirm = { reason ->
-                    harvestToVoid = null
-                    onVoidHarvest(target, reason)
-                },
-            )
-        }
-        Scaffold(containerColor = egglyticsColors.background) { insets ->
-            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Recolección", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(businessName, style = MaterialTheme.typography.bodySmall, color = egglyticsColors.onSurfaceVariant)
-                    }
-                    TextButton(onClick = onBack) { Text("Volver") }
-                }
-                TabRow(selectedTabIndex = if (showHistory) 1 else 0, containerColor = egglyticsColors.background) {
-                    Tab(selected = !showHistory, onClick = { showHistory = false }, text = { Text("Registro") })
-                    Tab(selected = showHistory, onClick = { showHistory = true }, text = { Text("Historial (${state.harvests.size})") })
-                }
-                if (showHistory) {
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        state.harvestsError?.let { item { Text(it, color = egglyticsColors.error) } }
-                        if (state.harvests.isEmpty() && state.harvestsError == null) {
-                            item {
-                                Surface(shape = shape, modifier = Modifier.fillMaxWidth()) {
-                                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Icon(painterResource(R.drawable.login_egg), null, tint = egglyticsColors.primary)
-                                        Text("Sin recolecciones registradas", style = MaterialTheme.typography.titleMedium)
-                                        Button(onClick = { showHistory = false }) { Text("Registrar primera recolección") }
-                                    }
+    val target = harvestToVoid
+    if (target != null) {
+        VoidReasonDialog(
+            title = "Anular recolección",
+            description = "Se registrará un reverso para la recolección del ${OperationalDate.format(target.harvest.fechaOperativa)}.",
+            onDismiss = { harvestToVoid = null },
+            onConfirm = { reason ->
+                harvestToVoid = null
+                onVoidHarvest(target, reason)
+            },
+        )
+    }
+    Scaffold(containerColor = egglyticsColors.background) { insets ->
+        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+            ModuleHeader("Recolección", businessName, onBack)
+            TabRow(selectedTabIndex = if (showHistory) 1 else 0, containerColor = egglyticsColors.background) {
+                Tab(selected = !showHistory, onClick = { showHistory = false }, text = { Text("Registro") })
+                Tab(selected = showHistory, onClick = { showHistory = true }, text = { Text("Historial (${state.harvests.size})") })
+            }
+            if (showHistory) {
+                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    state.harvestsError?.let { item { Text(it, color = egglyticsColors.error) } }
+                    if (state.harvests.isEmpty() && state.harvestsError == null) {
+                        item {
+                            Surface(shape = panelShape, modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Icon(painterResource(R.drawable.login_egg), null, tint = egglyticsColors.primary)
+                                    Text("Sin recolecciones registradas", style = MaterialTheme.typography.titleMedium)
+                                    Button(onClick = { showHistory = false }) { Text("Registrar primera recolección") }
                                 }
                             }
-                        }
-                        items(state.harvests, key = { it.harvest.id }) { item ->
-                            val reason = state.reversedHarvestReasons[item.harvest.id]
-                            HarvestRowCard(item, reason, state.canVoid && !item.isPendingWrite && reason == null,
-                                item.harvest.id in state.voidingHarvestIds, onVoidClick = { harvestToVoid = item })
                         }
                     }
-                } else {
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        item {
-                            OutlinedTextField(
-                                value = state.form.harvestDateInput, onValueChange = onHarvestDateChange,
-                                label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth(), shape = shape,
-                            )
-                        }
-                        item {
-                            Surface(shape = shape) {
-                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("Huevos por clasificación", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                    EggClassification.entries.forEach { classification ->
-                                        QuantityField(classification.name, state.form.harvestInputs[classification].orEmpty()) {
-                                            onHarvestQtyChange(classification, it)
-                                        }
-                                    }
-                                    HorizontalDivider()
-                                    val total = gradedTotal(state.form.harvestInputs)
-                                    Text("Total de aptos", style = MaterialTheme.typography.labelLarge)
-                                    val totalLabel = when (total) {
-                                        null -> "Revisa las cantidades"
-                                        BigInteger.ONE -> "1 huevo"
-                                        else -> "$total huevos"
-                                    }
-                                    Text(totalLabel,
-                                        color = egglyticsColors.primary, style = MaterialTheme.typography.headlineSmall)
-                                    if (total != null) {
-                                        val (buckets, remainder) = total.divideAndRemainder(SaleLine.EGGS_PER_BUCKET.toBigInteger())
-                                        Text("Cubetas completas: $buckets · Huevos sueltos: $remainder",
-                                            style = MaterialTheme.typography.bodySmall)
-                                    }
+                    items(state.harvests, key = { it.harvest.id }) { item ->
+                        val reason = state.reversedHarvestReasons[item.harvest.id]
+                        HarvestRowCard(item, reason, state.canVoid && !item.isPendingWrite && reason == null,
+                            item.harvest.id in state.voidingHarvestIds, onVoidClick = { harvestToVoid = item })
+                    }
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item {
+                        OutlinedTextField(
+                            value = state.form.harvestDateInput, onValueChange = onHarvestDateChange,
+                            label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true,
+                            modifier = Modifier.fillMaxWidth(), shape = fieldShape,
+                        )
+                    }
+                    item {
+                        SectionPanel("Huevos por clasificación") {
+                            EggClassification.entries.forEach { classification ->
+                                QuantityField(classification.name, state.form.harvestInputs[classification].orEmpty()) {
+                                    onHarvestQtyChange(classification, it)
                                 }
                             }
-                        }
-                        item {
-                            Surface(shape = shape, color = egglyticsColors.secondaryContainer) {
-                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("Huevos descartados", style = MaterialTheme.typography.titleMedium)
-                                    QuantityField("Descartados", state.form.discardedInput, onDiscardedChange)
-                                }
+                            HorizontalDivider()
+                            val total = gradedTotal(state.form.harvestInputs)
+                            Text("Total de aptos", style = MaterialTheme.typography.labelLarge)
+                            val totalLabel = when (total) {
+                                null -> "Revisa las cantidades"
+                                BigInteger.ONE -> "1 huevo"
+                                else -> "$total huevos"
+                            }
+                            Text(totalLabel,
+                                color = egglyticsColors.primary, style = MaterialTheme.typography.headlineSmall)
+                            if (total != null) {
+                                val (buckets, remainder) = total.divideAndRemainder(SaleLine.EGGS_PER_BUCKET.toBigInteger())
+                                Text("Cubetas completas: $buckets · Huevos sueltos: $remainder",
+                                    style = MaterialTheme.typography.bodySmall)
                             }
                         }
-                        item {
-                            OutlinedTextField(value = state.form.harvestNoteInput, onValueChange = onHarvestNoteChange,
-                                label = { Text("Nota (opcional)") }, modifier = Modifier.fillMaxWidth(), shape = shape)
+                    }
+                    item {
+                        SectionPanel("Huevos descartados", tint = egglyticsColors.secondaryContainer) {
+                            QuantityField("Descartados", state.form.discardedInput, onDiscardedChange)
                         }
-                        item {
-                            state.form.harvestError?.let { Text(it, color = egglyticsColors.error) }
-                            Button(onClick = onSubmitHarvest, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = shape) {
-                                Text("Guardar recolección")
-                            }
+                    }
+                    item {
+                        OutlinedTextField(value = state.form.harvestNoteInput, onValueChange = onHarvestNoteChange,
+                            label = { Text("Nota (opcional)") }, modifier = Modifier.fillMaxWidth(), shape = fieldShape)
+                    }
+                    item {
+                        state.form.harvestError?.let { Text(it, color = egglyticsColors.error) }
+                        Button(onClick = onSubmitHarvest, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = panelShape) {
+                            Text("Guardar recolección")
                         }
                     }
                 }
@@ -197,7 +178,7 @@ private fun QuantityField(label: String, value: String, onChange: (String) -> Un
         OutlinedTextField(
             value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.weight(1f), shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.weight(1f), shape = fieldShape,
         )
         IconButton(enabled = count != null && count > 0, onClick = { count?.let { onChange((it - 1).toString()) } },
             modifier = Modifier.semantics { contentDescription = "Restar un huevo: $label" }) { Text("−") }
@@ -220,7 +201,7 @@ private fun HarvestRowCard(
         .joinToString(" · ")
         .ifEmpty { "Aptos: 0" }
 
-    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = panelShape) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

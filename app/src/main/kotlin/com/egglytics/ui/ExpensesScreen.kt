@@ -1,10 +1,8 @@
 package com.egglytics.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,7 +17,6 @@ import java.time.LocalDate
 import java.text.NumberFormat
 import java.util.Locale
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
@@ -80,123 +77,115 @@ fun ExpensesScreen(
     var history by rememberSaveable { mutableStateOf(false) }
     var pendingVoid by remember { mutableStateOf<OutflowRow?>(null) }
 
-    MaterialTheme(colorScheme = egglyticsColors) {
-        pendingVoid?.let { row ->
-            VoidReasonDialog(
-                title = if (row.collection == ReversalTargetCollection.EXPENSES) "Anular gasto" else "Anular retiro",
-                description = "${row.title} del ${OperationalDate.format(row.date)} · ${money.format(row.amount)} $currency · ${row.method}",
-                onDismiss = { pendingVoid = null },
-                onConfirm = { reason ->
-                    onVoidMovement(row.collection, row.id, reason)
-                    pendingVoid = null
-                },
-            )
-        }
-        Scaffold(containerColor = egglyticsColors.background) { insets ->
-            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Gastos y retiros", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(businessName, style = MaterialTheme.typography.bodySmall)
-                    }
-                    TextButton(onClick = onBack) { Text("Volver") }
+    pendingVoid?.let { row ->
+        VoidReasonDialog(
+            title = if (row.collection == ReversalTargetCollection.EXPENSES) "Anular gasto" else "Anular retiro",
+            description = "${row.title} del ${OperationalDate.format(row.date)} · ${money.format(row.amount)} $currency · ${row.method}",
+            onDismiss = { pendingVoid = null },
+            onConfirm = { reason ->
+                onVoidMovement(row.collection, row.id, reason)
+                pendingVoid = null
+            },
+        )
+    }
+    Scaffold(containerColor = egglyticsColors.background) { insets ->
+        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+            ModuleHeader("Gastos y retiros", businessName, onBack)
+            TabRow(selectedTabIndex = if (history) 1 else 0, containerColor = egglyticsColors.background) {
+                Tab(selected = !history, onClick = { history = false }, text = { Text("Registro") })
+                Tab(selected = history, onClick = { history = true }, text = { Text("Historial") })
+            }
+            if (history) {
+                val rows = remember(state.expenses, state.withdrawals, state.categories, state.paymentMethods) {
+                    outflows(state)
                 }
-                TabRow(selectedTabIndex = if (history) 1 else 0, containerColor = egglyticsColors.background) {
-                    Tab(selected = !history, onClick = { history = false }, text = { Text("Registro") })
-                    Tab(selected = history, onClick = { history = true }, text = { Text("Historial") })
-                }
-                if (history) {
-                    val rows = remember(state.expenses, state.withdrawals, state.categories, state.paymentMethods) {
-                        outflows(state)
-                    }
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        item {
-                            OutflowPanel("Salidas registradas") {
-                                if (state.historyReady) {
-                                    Text("Gastos (${state.expenses.size}) · Retiros (${state.withdrawals.size})")
-                                    val active = rows.filter { it.key !in state.reversedReasons }
-                                    val expenses = active.filter { it.collection == ReversalTargetCollection.EXPENSES }.sumOf { it.amount.toBigInteger() }
-                                    val withdrawals = active.filter { it.collection == ReversalTargetCollection.WITHDRAWALS }.sumOf { it.amount.toBigInteger() }
-                                    Text("Gastos operativos · ${money.format(expenses)} $currency")
-                                    Text("Retiros personales · ${money.format(withdrawals)} $currency")
-                                    HorizontalDivider()
-                                    Text("Total de salidas · ${money.format(expenses + withdrawals)} $currency", style = MaterialTheme.typography.titleLarge)
-                                    if (active.size < rows.size) Text("Los importes excluyen movimientos anulados.", style = MaterialTheme.typography.bodySmall)
-                                    if (active.any { it.pending }) Text("Incluye salidas pendientes de sincronización.", style = MaterialTheme.typography.bodySmall)
-                                } else if (state.error == null) Text("Cargando movimientos…")
-                                state.error?.let { Text(it, color = egglyticsColors.error) }
-                            }
-                        }
-                        if (rows.isEmpty() && state.historyReady) item {
-                            OutflowPanel("Sin movimientos registrados") {
-                                TextButton(onClick = { history = false }) { Text("Registrar movimiento") }
-                            }
-                        }
-                        items(rows, key = { it.key }) { row ->
-                            val reason = state.reversedReasons[row.key]
-                            OutflowPanel(row.title) {
-                                Text(OperationalDate.format(row.date), style = MaterialTheme.typography.bodySmall)
-                                Text("${if (reason == null) "−" else ""}${money.format(row.amount)} $currency", style = MaterialTheme.typography.titleLarge)
-                                Text("Forma de pago · ${row.method}")
-                                row.description?.takeIf(String::isNotBlank)?.let { Text(it) }
-                                row.note?.takeIf(String::isNotBlank)?.let { Text("Nota: $it") }
-                                SyncStatusBadge(isPendingWrite = row.pending)
-                                if (reason != null) Text("Anulado · Motivo: $reason", color = egglyticsColors.error)
-                                else if (state.isAdmin && state.historyReady) TextButton(onClick = { pendingVoid = row }) { Text("Anular") }
-                            }
-                        }
-                    }
-                } else {
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        item {
-                            OutflowPanel("Tipo de movimiento") {
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(selected = expense, onClick = { onModeChange(ExpenseFormMode.EXPENSE) }, label = { Text("Gasto operativo") })
-                                    FilterChip(selected = !expense, onClick = { onModeChange(ExpenseFormMode.WITHDRAWAL) }, label = { Text("Retiro personal") })
-                                }
-                                Input("Fecha operativa (YYYY-MM-DD)", form.dateInput, onDateChange)
-                                Input("Monto ($currency)", form.amountInput, onAmountChange, numeric = true)
-                            }
-                        }
-                        if (expense) item {
-                            OutflowPanel("Categoría de gasto") {
-                                if (state.categories.isEmpty()) Text("No hay categorías activas.", color = egglyticsColors.error)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    state.categories.forEach { option ->
-                                        FilterChip(selected = option.id == form.selectedCategoryId, onClick = { onCategorySelect(option.id) },
-                                            label = { Text(option.name) })
-                                    }
-                                }
-                                Input("Descripción (opcional)", form.descriptionInput, onDescriptionChange)
-                            }
-                        }
-                        item {
-                            OutflowPanel("Forma de pago") {
-                                if (state.paymentMethods.isEmpty()) Text("No hay formas de pago activas.", color = egglyticsColors.error)
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    state.paymentMethods.forEach { option ->
-                                        FilterChip(selected = option.id == form.selectedMethodId, onClick = { onMethodSelect(option.id) },
-                                            label = { Text(option.name) })
-                                    }
-                                }
-                                Input("Nota (opcional)", form.noteInput, onNoteChange)
-                            }
-                        }
-                        item {
-                            Surface(color = egglyticsColors.secondaryContainer, shape = outflowShape) {
-                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("Salida de caja", style = MaterialTheme.typography.labelLarge)
-                                    Text(amount?.let { "−${money.format(it)} $currency" } ?: "—", style = MaterialTheme.typography.headlineMedium)
-                                    Text(listOfNotNull(if (expense) "Gasto operativo" else "Retiro personal", category.takeIf { expense }, method).joinToString(" · "))
-                                }
-                            }
-                        }
-                        item {
-                            form.formError?.let { Text(it, color = egglyticsColors.error) }
+                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item {
+                        SectionPanel("Salidas registradas") {
+                            if (state.historyReady) {
+                                Text("Gastos (${state.expenses.size}) · Retiros (${state.withdrawals.size})")
+                                val active = rows.filter { it.key !in state.reversedReasons }
+                                val expenses = active.filter { it.collection == ReversalTargetCollection.EXPENSES }.sumOf { it.amount.toBigInteger() }
+                                val withdrawals = active.filter { it.collection == ReversalTargetCollection.WITHDRAWALS }.sumOf { it.amount.toBigInteger() }
+                                Text("Gastos operativos · ${money.format(expenses)} $currency")
+                                Text("Retiros personales · ${money.format(withdrawals)} $currency")
+                                HorizontalDivider()
+                                Text("Total de salidas · ${money.format(expenses + withdrawals)} $currency", style = MaterialTheme.typography.titleLarge)
+                                if (active.size < rows.size) Text("Los importes excluyen movimientos anulados.", style = MaterialTheme.typography.bodySmall)
+                                if (active.any { it.pending }) Text("Incluye salidas pendientes de sincronización.", style = MaterialTheme.typography.bodySmall)
+                            } else if (state.error == null) Text("Cargando movimientos…")
                             state.error?.let { Text(it, color = egglyticsColors.error) }
-                            Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = outflowShape) {
-                                Text(if (expense) "Guardar gasto" else "Guardar retiro")
+                        }
+                    }
+                    if (rows.isEmpty() && state.historyReady) item {
+                        SectionPanel("Sin movimientos registrados") {
+                            TextButton(onClick = { history = false }) { Text("Registrar movimiento") }
+                        }
+                    }
+                    items(rows, key = { it.key }) { row ->
+                        val reason = state.reversedReasons[row.key]
+                        SectionPanel(row.title) {
+                            Text(OperationalDate.format(row.date), style = MaterialTheme.typography.bodySmall)
+                            Text("${if (reason == null) "−" else ""}${money.format(row.amount)} $currency", style = MaterialTheme.typography.titleLarge)
+                            Text("Forma de pago · ${row.method}")
+                            row.description?.takeIf(String::isNotBlank)?.let { Text(it) }
+                            row.note?.takeIf(String::isNotBlank)?.let { Text("Nota: $it") }
+                            SyncStatusBadge(isPendingWrite = row.pending)
+                            if (reason != null) Text("Anulado · Motivo: $reason", color = egglyticsColors.error)
+                            else if (state.isAdmin && state.historyReady) TextButton(onClick = { pendingVoid = row }) { Text("Anular") }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item {
+                        SectionPanel("Tipo de movimiento") {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(selected = expense, onClick = { onModeChange(ExpenseFormMode.EXPENSE) }, label = { Text("Gasto operativo") })
+                                FilterChip(selected = !expense, onClick = { onModeChange(ExpenseFormMode.WITHDRAWAL) }, label = { Text("Retiro personal") })
                             }
+                            CaptureField("Fecha operativa (YYYY-MM-DD)", form.dateInput, onDateChange)
+                            CaptureField("Monto ($currency)", form.amountInput, onAmountChange, numeric = true)
+                        }
+                    }
+                    if (expense) item {
+                        SectionPanel("Categoría de gasto") {
+                            if (state.categories.isEmpty()) Text("No hay categorías activas.", color = egglyticsColors.error)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                state.categories.forEach { option ->
+                                    FilterChip(selected = option.id == form.selectedCategoryId, onClick = { onCategorySelect(option.id) },
+                                        label = { Text(option.name) })
+                                }
+                            }
+                            CaptureField("Descripción (opcional)", form.descriptionInput, onDescriptionChange)
+                        }
+                    }
+                    item {
+                        SectionPanel("Forma de pago") {
+                            if (state.paymentMethods.isEmpty()) Text("No hay formas de pago activas.", color = egglyticsColors.error)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                state.paymentMethods.forEach { option ->
+                                    FilterChip(selected = option.id == form.selectedMethodId, onClick = { onMethodSelect(option.id) },
+                                        label = { Text(option.name) })
+                                }
+                            }
+                            CaptureField("Nota (opcional)", form.noteInput, onNoteChange)
+                        }
+                    }
+                    item {
+                        Surface(color = egglyticsColors.secondaryContainer, shape = panelShape) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Salida de caja", style = MaterialTheme.typography.labelLarge)
+                                Text(amount?.let { "−${money.format(it)} $currency" } ?: "—", style = MaterialTheme.typography.headlineMedium)
+                                Text(listOfNotNull(if (expense) "Gasto operativo" else "Retiro personal", category.takeIf { expense }, method).joinToString(" · "))
+                            }
+                        }
+                    }
+                    item {
+                        form.formError?.let { Text(it, color = egglyticsColors.error) }
+                        state.error?.let { Text(it, color = egglyticsColors.error) }
+                        Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = panelShape) {
+                            Text(if (expense) "Guardar gasto" else "Guardar retiro")
                         }
                     }
                 }
@@ -205,24 +194,6 @@ fun ExpensesScreen(
     }
 }
 
-private val outflowShape = RoundedCornerShape(16.dp)
-
-@Composable
-private fun OutflowPanel(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = outflowShape) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun Input(label: String, value: String, change: (String) -> Unit, numeric: Boolean = false) {
-    OutlinedTextField(value = value, onValueChange = change, label = { Text(label) }, modifier = Modifier.fillMaxWidth(),
-        singleLine = true, shape = RoundedCornerShape(10.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text))
-}
 
 private data class OutflowRow(
     val collection: ReversalTargetCollection, val id: String, val date: LocalDate, val createdAt: Instant,

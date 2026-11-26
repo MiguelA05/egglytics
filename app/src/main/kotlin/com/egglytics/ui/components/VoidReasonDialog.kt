@@ -15,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.egglytics.ui.fieldShape
 
 @Composable
 fun VoidReasonDialog(
@@ -36,6 +37,7 @@ fun VoidReasonDialog(
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 OutlinedTextField(
+                    shape = fieldShape,
                     value = reason,
                     onValueChange = {
                         reason = it

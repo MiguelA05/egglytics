@@ -11,6 +11,8 @@ internal val egglyticsColors = lightColorScheme(
     onSurface = Color(0xFF201B0E),
     onSurfaceVariant = Color(0xFF414940),
     outline = Color(0xFF727970),
+    tertiary = Color(0xFF805100),
+    onTertiary = Color.White,
     onSecondaryContainer = Color(0xFF614000),
     secondaryContainer = Color(0xFFF8EDD8),
 )

@@ -1,7 +1,6 @@
 package com.egglytics.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,7 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,115 +76,107 @@ fun CountsAndOpeningScreen(
             { onCashPhysicalChange(method.id, it) }, { onCashReasonChange(method.id, it) })
     }
     val fields = feed + cash
-    MaterialTheme(colorScheme = egglyticsColors) {
-        Scaffold(containerColor = egglyticsColors.background) { insets ->
-            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Conteos y cierre", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(businessName, style = MaterialTheme.typography.bodySmall)
+    Scaffold(containerColor = egglyticsColors.background) { insets ->
+        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+            ModuleHeader("Conteos y cierre", businessName, onBack)
+            if (state.sessionUid == null || state.readError != null) {
+                Text(state.readError ?: "Cargando saldos…", Modifier.padding(16.dp))
+                return@Column
+            }
+            val pages = if (state.isAdmin) listOf("Conteo", "Apertura", "Historial") else listOf("Conteo", "Historial")
+            val selected = if (history) "Historial" else if (opening) "Apertura" else "Conteo"
+            TabRow(selectedTabIndex = pages.indexOf(selected), containerColor = egglyticsColors.background) {
+                pages.forEach { page ->
+                    Tab(selected = page == selected, onClick = {
+                        history = page == "Historial"
+                        if (!history) onModeChange(if (page == "Apertura") CountsMode.OPENING else CountsMode.COUNT_OR_CLOSING)
+                    }, text = { Text(page) })
+                }
+            }
+            key(selected, step) {
+                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (history) {
+                        closingHistory(state, currency)
+                        return@LazyColumn
                     }
-                    TextButton(onClick = onBack) { Text("Volver") }
-                }
-                if (state.sessionUid == null || state.readError != null) {
-                    Text(state.readError ?: "Cargando saldos…", Modifier.padding(16.dp))
-                    return@Column
-                }
-                val pages = if (state.isAdmin) listOf("Conteo", "Apertura", "Historial") else listOf("Conteo", "Historial")
-                val selected = if (history) "Historial" else if (opening) "Apertura" else "Conteo"
-                TabRow(selectedTabIndex = pages.indexOf(selected), containerColor = egglyticsColors.background) {
-                    pages.forEach { page ->
-                        Tab(selected = page == selected, onClick = {
-                            history = page == "Historial"
-                            if (!history) onModeChange(if (page == "Apertura") CountsMode.OPENING else CountsMode.COUNT_OR_CLOSING)
-                        }, text = { Text(page) })
-                    }
-                }
-                key(selected, step) {
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (history) {
-                            closingHistory(state, currency)
-                            return@LazyColumn
+                    item {
+                        SectionPanel(if (opening) "Apertura de saldos" else "Jornada de conteo") {
+                            Text(when {
+                                state.hasPendingOpenings -> "Apertura pendiente de confirmación"
+                                state.openings.isNotEmpty() -> "Apertura confirmada · ${state.openings.size} saldos"
+                                else -> "Sin apertura confirmada"
+                            })
+                            OutlinedTextField(shape = fieldShape, value = form.dateInput, onValueChange = onDateChange,
+                                label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                            form.lastCountedSummary?.let { Text(it, color = egglyticsColors.primary) }
                         }
-                        item {
-                            CountPanel(if (opening) "Apertura de saldos" else "Jornada de conteo") {
-                                Text(when {
-                                    state.hasPendingOpenings -> "Apertura pendiente de confirmación"
-                                    state.openings.isNotEmpty() -> "Apertura confirmada · ${state.openings.size} saldos"
-                                    else -> "Sin apertura confirmada"
-                                })
-                                OutlinedTextField(value = form.dateInput, onValueChange = onDateChange,
-                                    label = { Text("Fecha operativa (YYYY-MM-DD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                                form.lastCountedSummary?.let { Text(it, color = egglyticsColors.primary) }
+                    }
+                    if (!opening) item {
+                        TabRow(step.ordinal, containerColor = egglyticsColors.background) {
+                            CountStep.entries.forEach { option ->
+                                Tab(selected = step == option, onClick = { step = option }, text = { Text(option.label) })
+                            }
+                        }
+                    }
+                    if (opening || step != CountStep.REVIEW) {
+                        if (opening || step == CountStep.FEED) item {
+                            SectionPanel(if (opening) "Inventario inicial" else "Conteo de alimento") {
+                                feed.forEach { CountInput(it, opening) }
+                            }
+                        }
+                        if (opening || step == CountStep.CASH) item {
+                            SectionPanel(if (opening) "Fondos iniciales" else "Conteo de caja") {
+                                if (cash.isEmpty()) Text("Sin formas de pago registradas.")
+                                cash.forEach { CountInput(it, opening) }
                             }
                         }
                         if (!opening) item {
-                            TabRow(step.ordinal, containerColor = egglyticsColors.background) {
-                                CountStep.entries.forEach { option ->
-                                    Tab(selected = step == option, onClick = { step = option }, text = { Text(option.label) })
-                                }
+                            Text("Deja el campo vacío para omitir el ítem. Escribe 0 si lo contaste y no había existencias.",
+                                style = MaterialTheme.typography.bodySmall)
+                            Button(onClick = { step = if (step == CountStep.FEED) CountStep.CASH else CountStep.REVIEW },
+                                modifier = Modifier.fillMaxWidth()) {
+                                Text(if (step == CountStep.FEED) "Continuar a caja" else "Revisar conteo")
                             }
                         }
-                        if (opening || step != CountStep.REVIEW) {
-                            if (opening || step == CountStep.FEED) item {
-                                CountPanel(if (opening) "Inventario inicial" else "Conteo de alimento") {
-                                    feed.forEach { CountInput(it, opening) }
-                                }
-                            }
-                            if (opening || step == CountStep.CASH) item {
-                                CountPanel(if (opening) "Fondos iniciales" else "Conteo de caja") {
-                                    if (cash.isEmpty()) Text("Sin formas de pago registradas.")
-                                    cash.forEach { CountInput(it, opening) }
-                                }
-                            }
-                            if (!opening) item {
-                                Text("Deja el campo vacío para omitir el ítem. Escribe 0 si lo contaste y no había existencias.",
-                                    style = MaterialTheme.typography.bodySmall)
-                                Button(onClick = { step = if (step == CountStep.FEED) CountStep.CASH else CountStep.REVIEW },
-                                    modifier = Modifier.fillMaxWidth()) {
-                                    Text(if (step == CountStep.FEED) "Continuar a caja" else "Revisar conteo")
-                                }
-                            }
-                        } else {
-                            item {
-                                val omitted = fields.count { it.raw.isBlank() }
-                                CountPanel(if (form.isClosing && omitted > 0) "Cierre parcial" else "Revisión del conteo",
-                                    tint = egglyticsColors.secondaryContainer) {
-                                    Text("Contados: ${fields.count { it.physical != null }} · Omitidos: $omitted")
-                                    Text("Diferencias: ${fields.count { it.differs }} · Justificadas: ${fields.count { it.differs && it.reason.isNotBlank() }}")
-                                }
-                            }
-                            item { ReviewGroup("Alimento", feed) { step = CountStep.FEED } }
-                            item { ReviewGroup("Caja", cash) { step = CountStep.CASH } }
-                            item {
-                                CountPanel("Registro de jornada") {
-                                    Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
-                                        value = form.isClosing, role = Role.Checkbox, onValueChange = onIsClosingChange,
-                                    ), verticalAlignment = Alignment.CenterVertically) {
-                                        Checkbox(checked = form.isClosing, onCheckedChange = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Guardar como cierre de jornada")
-                                    }
-                                    OutlinedTextField(value = form.noteInput, onValueChange = onNoteChange,
-                                        label = { Text("Nota (opcional)") }, modifier = Modifier.fillMaxWidth())
-                                }
+                    } else {
+                        item {
+                            val omitted = fields.count { it.raw.isBlank() }
+                            SectionPanel(if (form.isClosing && omitted > 0) "Cierre parcial" else "Revisión del conteo",
+                                tint = egglyticsColors.secondaryContainer) {
+                                Text("Contados: ${fields.count { it.physical != null }} · Omitidos: $omitted")
+                                Text("Diferencias: ${fields.count { it.differs }} · Justificadas: ${fields.count { it.differs && it.reason.isNotBlank() }}")
                             }
                         }
-                        if (opening) item {
-                            CountPanel("Saldos iniciales ingresados", tint = egglyticsColors.secondaryContainer) {
-                                Text("Alimento · ${initialTotal(feed)} kg")
-                                Text("Caja · ${initialTotal(cash)} $currency")
+                        item { ReviewGroup("Alimento", feed) { step = CountStep.FEED } }
+                        item { ReviewGroup("Caja", cash) { step = CountStep.CASH } }
+                        item {
+                            SectionPanel("Registro de jornada") {
+                                Row(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(
+                                    value = form.isClosing, role = Role.Checkbox, onValueChange = onIsClosingChange,
+                                ), verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(checked = form.isClosing, onCheckedChange = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Guardar como cierre de jornada")
+                                }
+                                OutlinedTextField(shape = fieldShape, value = form.noteInput, onValueChange = onNoteChange,
+                                    label = { Text("Nota (opcional)") }, modifier = Modifier.fillMaxWidth())
                             }
                         }
-                        if (opening || step == CountStep.REVIEW) item {
-                            form.formError?.let { Text(it, color = egglyticsColors.error) }
-                            Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                                Text(when {
-                                    opening -> "Guardar apertura"
-                                    form.isClosing -> "Guardar cierre"
-                                    else -> "Guardar conteo"
-                                })
-                            }
+                    }
+                    if (opening) item {
+                        SectionPanel("Saldos iniciales ingresados", tint = egglyticsColors.secondaryContainer) {
+                            Text("Alimento · ${initialTotal(feed)} kg")
+                            Text("Caja · ${initialTotal(cash)} $currency")
+                        }
+                    }
+                    if (opening || step == CountStep.REVIEW) item {
+                        form.formError?.let { Text(it, color = egglyticsColors.error) }
+                        Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            Text(when {
+                                opening -> "Guardar apertura"
+                                form.isClosing -> "Guardar cierre"
+                                else -> "Guardar conteo"
+                            })
                         }
                     }
                 }
@@ -212,32 +202,22 @@ private fun initialTotal(fields: List<CountField>): String {
 }
 
 @Composable
-private fun CountPanel(title: String, tint: Color = egglyticsColors.surface, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(16.dp), color = tint) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            content()
-        }
-    }
-}
-
-@Composable
 private fun CountInput(field: CountField, opening: Boolean) {
     Text(field.label, fontWeight = FontWeight.SemiBold)
     if (!opening) Text("Esperado: ${field.expected} ${field.unit}", style = MaterialTheme.typography.bodySmall)
-    OutlinedTextField(value = field.raw, onValueChange = field.change, singleLine = true,
+    OutlinedTextField(shape = fieldShape, value = field.raw, onValueChange = field.change, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(),
         label = { Text(if (opening) "Saldo inicial (${field.unit})" else "Cantidad física (${field.unit})") })
     if (!opening && field.differs) {
         Text("Diferencia: ${field.difference} ${field.unit}", color = egglyticsColors.onSecondaryContainer)
-        OutlinedTextField(value = field.reason, onValueChange = field.changeReason, label = { Text("Motivo de la diferencia") },
+        OutlinedTextField(shape = fieldShape, value = field.reason, onValueChange = field.changeReason, label = { Text("Motivo de la diferencia") },
             supportingText = { Text("Obligatorio cuando hay diferencia") }, modifier = Modifier.fillMaxWidth())
     }
 }
 
 @Composable
 private fun ReviewGroup(title: String, fields: List<CountField>, edit: () -> Unit) {
-    CountPanel(title) {
+    SectionPanel(title) {
         fields.forEach { field ->
             val status = when {
                 field.raw.isBlank() -> "Omitido"
@@ -272,7 +252,7 @@ private fun LazyListScope.closingHistory(state: CountsAndOpeningUiState, currenc
             val countedKeys = linkedCounts.flatMap { it.items.keys }.toSet()
             val omittedKeys = labels.keys.filter { it !in countedKeys }
             val s = closing.summary
-            Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            Surface(modifier = Modifier.fillMaxWidth(), shape = panelShape) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

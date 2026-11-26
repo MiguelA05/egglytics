@@ -1,10 +1,8 @@
 package com.egglytics.ui
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -23,7 +21,6 @@ import java.time.LocalDate
 import java.text.NumberFormat
 import java.util.Locale
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
@@ -101,148 +98,140 @@ fun FeedScreen(
     }
     val purchase = form.mode == FeedFormMode.PURCHASE
 
-    MaterialTheme(colorScheme = egglyticsColors) {
-        pendingVoid?.let { target ->
-            VoidReasonDialog(
-                title = "Anular movimiento",
-                description = "${target.title} del ${OperationalDate.format(target.date)} · ${target.detail}",
-                onDismiss = { pendingVoid = null },
-                onConfirm = { reason ->
-                    onVoidMovement(target.collection, target.id, reason)
-                    pendingVoid = null
-                },
-            )
-        }
-        Scaffold(containerColor = egglyticsColors.background) { insets ->
-            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Alimento", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(businessName, style = MaterialTheme.typography.bodySmall)
-                    }
-                    TextButton(onClick = onBack) { Text("Volver") }
+    pendingVoid?.let { target ->
+        VoidReasonDialog(
+            title = "Anular movimiento",
+            description = "${target.title} del ${OperationalDate.format(target.date)} · ${target.detail}",
+            onDismiss = { pendingVoid = null },
+            onConfirm = { reason ->
+                onVoidMovement(target.collection, target.id, reason)
+                pendingVoid = null
+            },
+        )
+    }
+    Scaffold(containerColor = egglyticsColors.background) { insets ->
+        Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+            ModuleHeader("Alimento", businessName, onBack)
+            TabRow(selectedTabIndex = tab.ordinal, containerColor = egglyticsColors.background) {
+                FeedTab.entries.forEach { page ->
+                    Tab(selected = tab == page, onClick = { tab = page }, text = { Text(page.label) })
                 }
-                TabRow(selectedTabIndex = tab.ordinal, containerColor = egglyticsColors.background) {
-                    FeedTab.entries.forEach { page ->
-                        Tab(selected = tab == page, onClick = { tab = page }, text = { Text(page.label) })
-                    }
-                }
-                key(tab) {
-                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        state.feedError?.let { item { Text(it, color = egglyticsColors.error) } }
-                        when (tab) {
-                            FeedTab.REGISTER -> {
-                                item {
-                                    FeedPanel("Tipo de movimiento") {
-                                        Choices(FeedFormMode.entries, form.mode, onModeChange) { it.label() }
-                                        Text("Ingrediente", style = MaterialTheme.typography.labelLarge)
-                                        Choices(FeedIngredient.entries, form.ingredient, onIngredientChange, ::ingredientLabel)
-                                        Field("Fecha operativa (YYYY-MM-DD)", form.dateInput, onDateChange)
-                                    }
-                                }
-                                item {
-                                    FeedPanel(if (purchase) "Entrada por compra" else "Salida de alimento") {
-                                        if (form.mode == FeedFormMode.LOSS) {
-                                            Field("Kg perdidos", form.lossKgInput, onLossKgChange, numeric = true)
-                                            Text("Tipo de pérdida", style = MaterialTheme.typography.labelLarge)
-                                            Choices(FeedLossType.entries, form.lossType, onLossTypeChange) { it.label() }
-                                            Field("Motivo (obligatorio)", form.lossReasonInput, onLossReasonChange)
-                                        } else {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Field("Bultos de $KG_PER_FEED_BAG kg", form.bagsInput, onBagsChange, Modifier.weight(1f), numeric = true)
-                                                val n = if (form.bagsInput.isBlank()) 0L else form.bagsInput.trim().toLongOrNull()
-                                                StepButton("Restar un bulto", "−", n != null && n > 0) { n?.let { onBagsChange((it - 1).toString()) } }
-                                                StepButton("Sumar un bulto", "+", n != null && n in 0 until Long.MAX_VALUE / KG_PER_FEED_BAG) { n?.let { onBagsChange((it + 1).toString()) } }
-                                            }
-                                            if (purchase) {
-                                                Field("Costo total ($currency)", form.totalCostInput, onTotalCostChange, numeric = true)
-                                                Text("Forma de pago", style = MaterialTheme.typography.labelLarge)
-                                                if (state.paymentMethods.isEmpty()) Text("No hay formas de pago activas.", color = egglyticsColors.error)
-                                                Choices(state.paymentMethods, state.paymentMethods.find { it.id == form.selectedMethodId },
-                                                    { onMethodSelect(it.id) }) { it.name }
-                                                Field("Proveedor (opcional)", form.supplierInput, onSupplierChange)
-                                            }
-                                        }
-                                        Field("Nota (opcional)", form.noteInput, onNoteChange)
-                                    }
-                                }
-                                item {
-                                    Surface(color = egglyticsColors.secondaryContainer, shape = panelShape) {
-                                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Text("Efecto en el saldo", style = MaterialTheme.typography.labelLarge)
-                                            val sign = if (purchase) "+" else "−"
-                                            Text(weight?.let { "$sign$it kg" } ?: "—", style = MaterialTheme.typography.headlineSmall)
-                                            Text("${form.mode.label()} · ${ingredientLabel(form.ingredient)}")
-                                            if (purchase) {
-                                                val cost = form.totalCostInput.trim().toLongOrNull()
-                                                val method = state.paymentMethods.find { it.id == form.selectedMethodId }
-                                                if (cost != null && cost > 0) {
-                                                    val amount = NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CO")).format(cost)
-                                                    Text(listOfNotNull("$amount $currency", method?.name).joinToString(" · "))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                item {
-                                    form.formError?.let { Text(it, color = egglyticsColors.error) }
-                                    Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                                        shape = panelShape) { Text("Guardar registro") }
+            }
+            key(tab) {
+                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    state.feedError?.let { item { Text(it, color = egglyticsColors.error) } }
+                    when (tab) {
+                        FeedTab.REGISTER -> {
+                            item {
+                                SectionPanel("Tipo de movimiento") {
+                                    Choices(FeedFormMode.entries, form.mode, onModeChange) { it.label() }
+                                    Text("Ingrediente", style = MaterialTheme.typography.labelLarge)
+                                    Choices(FeedIngredient.entries, form.ingredient, onIngredientChange, ::ingredientLabel)
+                                    CaptureField("Fecha operativa (YYYY-MM-DD)", form.dateInput, onDateChange)
                                 }
                             }
-                            FeedTab.SUMMARY -> {
-                                item {
-                                    FeedPanel("Periodo de consumo") {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Field("Desde", form.periodStartInput, onPeriodStartChange, Modifier.weight(1f))
-                                            Field("Hasta", form.periodEndInput, onPeriodEndChange, Modifier.weight(1f))
+                            item {
+                                SectionPanel(if (purchase) "Entrada por compra" else "Salida de alimento") {
+                                    if (form.mode == FeedFormMode.LOSS) {
+                                        CaptureField("Kg perdidos", form.lossKgInput, onLossKgChange, numeric = true)
+                                        Text("Tipo de pérdida", style = MaterialTheme.typography.labelLarge)
+                                        Choices(FeedLossType.entries, form.lossType, onLossTypeChange) { it.label() }
+                                        CaptureField("Motivo (obligatorio)", form.lossReasonInput, onLossReasonChange)
+                                    } else {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            CaptureField("Bultos de $KG_PER_FEED_BAG kg", form.bagsInput, onBagsChange, Modifier.weight(1f), numeric = true)
+                                            val n = if (form.bagsInput.isBlank()) 0L else form.bagsInput.trim().toLongOrNull()
+                                            StepButton("Restar un bulto", "−", n != null && n > 0) { n?.let { onBagsChange((it - 1).toString()) } }
+                                            StepButton("Sumar un bulto", "+", n != null && n in 0 until Long.MAX_VALUE / KG_PER_FEED_BAG) { n?.let { onBagsChange((it + 1).toString()) } }
+                                        }
+                                        if (purchase) {
+                                            CaptureField("Costo total ($currency)", form.totalCostInput, onTotalCostChange, numeric = true)
+                                            Text("Forma de pago", style = MaterialTheme.typography.labelLarge)
+                                            if (state.paymentMethods.isEmpty()) Text("No hay formas de pago activas.", color = egglyticsColors.error)
+                                            Choices(state.paymentMethods, state.paymentMethods.find { it.id == form.selectedMethodId },
+                                                { onMethodSelect(it.id) }) { it.name }
+                                            CaptureField("Proveedor (opcional)", form.supplierInput, onSupplierChange)
                                         }
                                     }
+                                    CaptureField("Nota (opcional)", form.noteInput, onNoteChange)
                                 }
-                                items(FeedIngredient.entries) { ingredient ->
-                                    val summary = state.summaries[ingredient]
-                                    FeedPanel(ingredientLabel(ingredient)) {
-                                        Text("Saldo esperado", style = MaterialTheme.typography.labelLarge)
-                                        Text(summary?.let { "${it.balanceKg} kg" } ?: "Sin datos",
-                                            style = MaterialTheme.typography.headlineMedium, color = egglyticsColors.primary)
-                                        Text("Aproximado con un bulto abierto", style = MaterialTheme.typography.bodySmall)
-                                        HorizontalDivider()
-                                        Text(when {
-                                            summary == null -> "Sin base inicial"
-                                            !summary.hasBase -> "Falta apertura o conteo base (usando 0 kg)"
-                                            else -> summary.baseSourceLabel?.let { "Base: $it" } ?: "Base configurada"
-                                        })
-                                        Text("Consumo diario estimado" + (summary?.let { " (${it.inclusiveDays} días)" } ?: ""))
-                                        Text(summary?.formattedDailyConsumption() ?: "Sin datos", fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                item { Button(onClick = { tab = FeedTab.REGISTER }) { Text("Registrar movimiento") } }
                             }
-                            FeedTab.HISTORY -> {
-                                val visible = movements.filter { filter == null || it.ingredient == filter }
-                                item {
-                                    FeedPanel("Movimientos (${visible.size})") {
-                                        Choices(listOf(null) + FeedIngredient.entries, filter, { filter = it }) {
-                                            it?.let(::ingredientLabel) ?: "Todos"
+                            item {
+                                Surface(color = egglyticsColors.secondaryContainer, shape = panelShape) {
+                                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Efecto en el saldo", style = MaterialTheme.typography.labelLarge)
+                                        val sign = if (purchase) "+" else "−"
+                                        Text(weight?.let { "$sign$it kg" } ?: "—", style = MaterialTheme.typography.headlineSmall)
+                                        Text("${form.mode.label()} · ${ingredientLabel(form.ingredient)}")
+                                        if (purchase) {
+                                            val cost = form.totalCostInput.trim().toLongOrNull()
+                                            val method = state.paymentMethods.find { it.id == form.selectedMethodId }
+                                            if (cost != null && cost > 0) {
+                                                val amount = NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CO")).format(cost)
+                                                Text(listOfNotNull("$amount $currency", method?.name).joinToString(" · "))
+                                            }
                                         }
                                     }
                                 }
-                                if (visible.isEmpty() && state.feedError == null) {
-                                    item { FeedPanel("Sin movimientos registrados") {
-                                        Button(onClick = { tab = FeedTab.REGISTER }) { Text("Registrar movimiento") }
-                                    } }
-                                }
-                                items(visible, key = { it.key }) { entry ->
-                                    val reason = state.reversedReasons[entry.key]
-                                    FeedPanel(entry.title) {
-                                        Text(OperationalDate.format(entry.date), style = MaterialTheme.typography.bodySmall)
-                                        Text(entry.detail, fontWeight = FontWeight.Bold)
-                                        entry.extra?.let { Text(it) }
-                                        entry.note?.takeIf { it.isNotBlank() }?.let { Text(it) }
-                                        SyncStatusBadge(isPendingWrite = entry.pending)
-                                        if (reason != null) Text("Anulado · Motivo: $reason", color = egglyticsColors.error)
-                                        else if (state.isAdmin) TextButton(onClick = { pendingVoid = entry }) { Text("Anular") }
+                            }
+                            item {
+                                form.formError?.let { Text(it, color = egglyticsColors.error) }
+                                Button(onClick = onSubmit, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                                    shape = panelShape) { Text("Guardar registro") }
+                            }
+                        }
+                        FeedTab.SUMMARY -> {
+                            item {
+                                SectionPanel("Periodo de consumo") {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        CaptureField("Desde", form.periodStartInput, onPeriodStartChange, Modifier.weight(1f))
+                                        CaptureField("Hasta", form.periodEndInput, onPeriodEndChange, Modifier.weight(1f))
                                     }
+                                }
+                            }
+                            items(FeedIngredient.entries) { ingredient ->
+                                val summary = state.summaries[ingredient]
+                                SectionPanel(ingredientLabel(ingredient)) {
+                                    Text("Saldo esperado", style = MaterialTheme.typography.labelLarge)
+                                    Text(summary?.let { "${it.balanceKg} kg" } ?: "Sin datos",
+                                        style = MaterialTheme.typography.headlineMedium, color = egglyticsColors.primary)
+                                    Text("Aproximado con un bulto abierto", style = MaterialTheme.typography.bodySmall)
+                                    HorizontalDivider()
+                                    Text(when {
+                                        summary == null -> "Sin base inicial"
+                                        !summary.hasBase -> "Falta apertura o conteo base (usando 0 kg)"
+                                        else -> summary.baseSourceLabel?.let { "Base: $it" } ?: "Base configurada"
+                                    })
+                                    Text("Consumo diario estimado" + (summary?.let { " (${it.inclusiveDays} días)" } ?: ""))
+                                    Text(summary?.formattedDailyConsumption() ?: "Sin datos", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            item { Button(onClick = { tab = FeedTab.REGISTER }) { Text("Registrar movimiento") } }
+                        }
+                        FeedTab.HISTORY -> {
+                            val visible = movements.filter { filter == null || it.ingredient == filter }
+                            item {
+                                SectionPanel("Movimientos (${visible.size})") {
+                                    Choices(listOf(null) + FeedIngredient.entries, filter, { filter = it }) {
+                                        it?.let(::ingredientLabel) ?: "Todos"
+                                    }
+                                }
+                            }
+                            if (visible.isEmpty() && state.feedError == null) {
+                                item { SectionPanel("Sin movimientos registrados") {
+                                    Button(onClick = { tab = FeedTab.REGISTER }) { Text("Registrar movimiento") }
+                                } }
+                            }
+                            items(visible, key = { it.key }) { entry ->
+                                val reason = state.reversedReasons[entry.key]
+                                SectionPanel(entry.title) {
+                                    Text(OperationalDate.format(entry.date), style = MaterialTheme.typography.bodySmall)
+                                    Text(entry.detail, fontWeight = FontWeight.Bold)
+                                    entry.extra?.let { Text(it) }
+                                    entry.note?.takeIf { it.isNotBlank() }?.let { Text(it) }
+                                    SyncStatusBadge(isPendingWrite = entry.pending)
+                                    if (reason != null) Text("Anulado · Motivo: $reason", color = egglyticsColors.error)
+                                    else if (state.isAdmin) TextButton(onClick = { pendingVoid = entry }) { Text("Anular") }
                                 }
                             }
                         }
@@ -254,24 +243,6 @@ fun FeedScreen(
 }
 
 private enum class FeedTab(val label: String) { SUMMARY("Resumen"), REGISTER("Registro"), HISTORY("Historial") }
-private val panelShape = RoundedCornerShape(16.dp)
-
-@Composable
-private fun FeedPanel(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = panelShape) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun Field(label: String, value: String, change: (String) -> Unit, modifier: Modifier = Modifier, numeric: Boolean = false) {
-    OutlinedTextField(value = value, onValueChange = change, label = { Text(label) }, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text),
-        modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp))
-}
 
 @Composable
 private fun StepButton(description: String, symbol: String, enabled: Boolean, click: () -> Unit) {
