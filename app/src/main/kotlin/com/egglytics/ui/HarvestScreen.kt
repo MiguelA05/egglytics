@@ -124,18 +124,17 @@ fun HarvestScreen(
                                 }
                             }
                             HorizontalDivider()
-                            val total = gradedTotal(state.form.harvestInputs)
+                            val summary = summarizeGradedEggs(state.form.harvestInputs)
                             Text("Total de aptos", style = MaterialTheme.typography.labelLarge)
-                            val totalLabel = when (total) {
+                            val totalLabel = when (val total = summary?.total) {
                                 null -> "Revisa las cantidades"
                                 BigInteger.ONE -> "1 huevo"
                                 else -> "$total huevos"
                             }
                             Text(totalLabel,
                                 color = egglyticsColors.primary, style = MaterialTheme.typography.headlineSmall)
-                            if (total != null) {
-                                val (buckets, remainder) = total.divideAndRemainder(SaleLine.EGGS_PER_BUCKET.toBigInteger())
-                                Text("Cubetas completas: $buckets · Huevos sueltos: $remainder",
+                            if (summary != null) {
+                                Text("Cubetas completas: ${summary.fullBuckets} · Huevos sueltos: ${summary.looseEggs}",
                                     style = MaterialTheme.typography.bodySmall)
                             }
                         }
@@ -161,14 +160,20 @@ fun HarvestScreen(
     }
 }
 
-private fun gradedTotal(inputs: Map<EggClassification, String>): BigInteger? {
-    var total = BigInteger.ZERO
+internal data class GradedEggSummary(val fullBuckets: BigInteger, val looseEggs: Long) {
+    val total = fullBuckets * SaleLine.EGGS_PER_BUCKET.toBigInteger() + looseEggs.toBigInteger()
+}
+
+internal fun summarizeGradedEggs(inputs: Map<EggClassification, String>): GradedEggSummary? {
+    var fullBuckets = BigInteger.ZERO
+    var looseEggs = 0L
     for (raw in inputs.values) {
         if (raw.isBlank()) continue
         val count = raw.trim().toLongOrNull()?.takeIf { it >= 0 } ?: return null
-        total += count.toBigInteger()
+        fullBuckets += (count / SaleLine.EGGS_PER_BUCKET).toBigInteger()
+        looseEggs += count % SaleLine.EGGS_PER_BUCKET
     }
-    return total
+    return GradedEggSummary(fullBuckets, looseEggs)
 }
 
 @Composable
