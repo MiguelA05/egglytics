@@ -98,6 +98,11 @@ class SessionViewModelTest {
         assertTrue(state.sessionState is SessionState.Authenticated)
         assertEquals(AppDestination.HOME, state.destination)
         assertEquals(ActivePriceResult.Found(activeAaPrice), state.activePrices[EggClassification.AA])
+        vm.editPrice(EggClassification.AA)
+        vm.savePrice("22000", "2026-11-21")
+        advanceUntilIdle()
+        assertEquals(null, vm.uiState.value.priceEditor)
+        assertEquals(listOf(activeAaPrice), priceRepo.getPrices())
     }
 
     @Test
@@ -154,6 +159,30 @@ class SessionViewModelTest {
         assertTrue(sessionRepo.signedOut)
     }
 
+    @Test
+    fun `admin adds dated prices and invalid amounts create no version`() = runTest {
+        val admin = operatorMember.copy(role = MemberRole.ADMIN)
+        val repo = FakePriceRepository(listOf(activeAaPrice))
+        val vm = SessionViewModel(FakeSessionRepository(SessionState.Authenticated(admin.uid, admin.email, admin, business)),
+            repo, GetActivePriceUseCase(), fixedClock)
+        advanceUntilIdle()
+        vm.editPrice(EggClassification.AA)
+        vm.savePrice("0", "2026-11-21")
+        assertTrue(vm.uiState.value.priceEditor?.error != null)
+        assertEquals(1, repo.getPrices().size)
+        vm.savePrice("21000", "2026-11-21")
+        advanceUntilIdle()
+        vm.editPrice(EggClassification.AA)
+        vm.savePrice("24000", "2026-12-01")
+        advanceUntilIdle()
+        val catalog = vm.uiState.value.catalog
+        assertEquals(3, catalog.size)
+        assertEquals(admin.uid, catalog.last().createdBy)
+        assertEquals(21000L, (vm.uiState.value.activePrices[EggClassification.AA] as ActivePriceResult.Found).price.pricePerBucket)
+        val historic = GetActivePriceUseCase()(catalog, EggClassification.AA, LocalDate.parse("2026-11-20"))
+        assertEquals(ActivePriceResult.Found(activeAaPrice), historic)
+    }
+
     private class FakeSessionRepository(
         initial: SessionState = SessionState.Unauthenticated,
         private val signInHandler: suspend (String, String) -> SessionState = { _, _ -> initial },
@@ -176,6 +205,9 @@ class SessionViewModelTest {
 
     private class FakePriceRepository(initial: List<Price>) : PriceRepository {
         private val flow = MutableStateFlow(initial)
+        override suspend fun addPrice(classification: EggClassification, amount: Long, validFrom: LocalDate, uid: String) {
+            flow.value += Price("new", classification, amount, validFrom, Instant.parse("2026-11-21T15:00:00Z"), uid)
+        }
         override fun observePrices(): Flow<List<Price>> = flow
         override suspend fun getPrices(): List<Price> = flow.value
     }

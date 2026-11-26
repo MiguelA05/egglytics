@@ -9,6 +9,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -37,8 +42,33 @@ internal fun HomeRoute(
     sessionUi: SessionUiState,
     navigateTo: (AppDestination) -> Unit,
     onSignOut: () -> Unit,
+    onEditPrice: (EggClassification) -> Unit,
+    onSavePrice: (String, String) -> Unit,
+    onDismissPrice: () -> Unit,
 ) {
     val homeUi by homeViewModel.uiState.collectAsStateWithLifecycle()
+    sessionUi.priceEditor?.let { editor ->
+        var amount by rememberSaveable(editor.classification) { mutableStateOf(editor.amount) }
+        var date by rememberSaveable(editor.classification) { mutableStateOf(editor.validFrom) }
+        AlertDialog(
+            onDismissRequest = onDismissPrice,
+            title = { Text("Precio por cubeta · ${editor.classification.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Valor (${session.business.currency})") },
+                        singleLine = true, shape = fieldShape, enabled = !editor.saving,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    OutlinedTextField(value = date, onValueChange = { date = it }, label = { Text("Vigente desde (YYYY-MM-DD)") },
+                        singleLine = true, shape = fieldShape, enabled = !editor.saving)
+                    editor.error?.let { Text(it, color = egglyticsColors.error) }
+                }
+            },
+            confirmButton = { TextButton(enabled = !editor.saving, onClick = { onSavePrice(amount, date) }) {
+                Text(if (editor.saving) "Guardando…" else "Guardar precio")
+            } },
+            dismissButton = { TextButton(enabled = !editor.saving, onClick = onDismissPrice) { Text("Cancelar") } },
+        )
+    }
     HomeScreen(
         session = session,
         state = sessionUi,
@@ -52,6 +82,7 @@ internal fun HomeRoute(
         onRetryReconcile = homeViewModel::retryReconcile,
         onDismissSyncNotice = homeViewModel::dismissSyncNotice,
         onSignOut = onSignOut,
+        onEditPrice = onEditPrice,
     )
 }
 
@@ -68,6 +99,7 @@ fun HomeScreen(
     onOpenCounts: () -> Unit,
     onRetryReconcile: () -> Unit,
     onDismissSyncNotice: (String) -> Unit,
+    onEditPrice: (EggClassification) -> Unit,
     onSignOut: () -> Unit,
 ) {
     val currency = session.business.currency
@@ -181,6 +213,7 @@ fun HomeScreen(
                 Surface(shape = panelShape, color = egglyticsColors.surface) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                         state.pricesError?.let { Text(it, color = egglyticsColors.error) }
+                        state.priceNotice?.let { Text(it, color = egglyticsColors.primary) }
                         EggClassification.entries.forEachIndexed { index, classification ->
                             if (index > 0) HorizontalDivider()
                             Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -188,6 +221,11 @@ fun HomeScreen(
                                 val price = state.activePrices[classification] as? ActivePriceResult.Found
                                 Text(price?.let { "${numbers.format(it.price.pricePerBucket)} $currency" } ?: "Sin precio vigente",
                                     color = if (price == null) egglyticsColors.onSurfaceVariant else egglyticsColors.primary)
+                                if (session.member.role == MemberRole.ADMIN) {
+                                    TextButton(onClick = { onEditPrice(classification) }) {
+                                        Text(if (price == null) "Asignar" else "Editar")
+                                    }
+                                }
                             }
                         }
                     }

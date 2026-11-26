@@ -47,6 +47,7 @@ internal fun EgglyticsApp(
         }
 
         is SessionState.Authenticated -> {
+            LaunchedEffect(session.uid) { sessionViewModel.trackPriceDate() }
             when (sessionUi.destination) {
                 AppDestination.HOME -> HomeRoute(
                     session,
@@ -54,6 +55,9 @@ internal fun EgglyticsApp(
                     sessionUi,
                     sessionViewModel::navigateTo,
                     sessionViewModel::signOut,
+                    sessionViewModel::editPrice,
+                    sessionViewModel::savePrice,
+                    sessionViewModel::dismissPriceEditor,
                 )
 
                 AppDestination.HARVESTS -> HarvestRoute(
@@ -65,7 +69,7 @@ internal fun EgglyticsApp(
                 AppDestination.SALES -> SaleRoute(
                     session,
                     saleViewModel,
-                    sessionUi.activePrices,
+                    sessionUi.catalog,
                     sessionViewModel::navigateHome,
                 )
 

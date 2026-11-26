@@ -7,6 +7,9 @@ import com.egglytics.data.repository.SessionRepository
 import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.MemberRole
+import com.egglytics.domain.model.Price
+import kotlinx.coroutines.CancellationException
 import com.egglytics.domain.usecase.ActivePriceResult
 import com.egglytics.domain.usecase.GetActivePriceUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,6 +34,14 @@ enum class AppDestination {
     COUNTS,
 }
 
+data class PriceEditor(
+    val classification: EggClassification,
+    val amount: String,
+    val validFrom: String,
+    val saving: Boolean = false,
+    val error: String? = null,
+)
+
 data class SessionUiState(
     val email: String = "",
     val password: String = "",
@@ -40,6 +51,9 @@ data class SessionUiState(
     val operationalDate: LocalDate = LocalDate.now(OperationalDate.BOGOTA_ZONE),
     val activePrices: Map<EggClassification, ActivePriceResult> = emptyMap(),
     val pricesError: String? = null,
+    val catalog: List<Price> = emptyList(),
+    val priceEditor: PriceEditor? = null,
+    val priceNotice: String? = null,
 )
 
 @HiltViewModel
@@ -77,6 +91,51 @@ class SessionViewModel @Inject constructor(
 
     fun navigateHome() {
         _uiState.update { it.copy(destination = AppDestination.HOME) }
+    }
+
+    fun editPrice(classification: EggClassification) {
+        val state = _uiState.value
+        val session = state.sessionState as? SessionState.Authenticated ?: return
+        if (session.member.role != MemberRole.ADMIN || state.priceEditor?.saving == true) return
+        val today = OperationalDate.today(clock)
+        val current = getActivePriceUseCase(state.catalog, classification, today) as? ActivePriceResult.Found
+        _uiState.update { it.copy(priceEditor = PriceEditor(classification,
+            current?.price?.pricePerBucket?.toString().orEmpty(), OperationalDate.format(today)), priceNotice = null) }
+    }
+
+    fun dismissPriceEditor() {
+        _uiState.update { if (it.priceEditor?.saving == true) it else it.copy(priceEditor = null) }
+    }
+
+    fun savePrice(amountInput: String, dateInput: String) {
+        val session = _uiState.value.sessionState as? SessionState.Authenticated ?: return
+        val editor = _uiState.value.priceEditor ?: return
+        if (session.member.role != MemberRole.ADMIN || editor.saving) return
+        val amount = amountInput.trim().toLongOrNull()
+        val date = runCatching { OperationalDate.parse(dateInput.trim()) }.getOrNull()
+        val error = when {
+            amount == null || amount <= 0 -> "Ingresa un valor entero mayor que cero."
+            date == null -> "Ingresa una fecha válida en formato YYYY-MM-DD."
+            else -> null
+        }
+        if (error != null || amount == null || date == null) {
+            _uiState.update { it.copy(priceEditor = editor.copy(error = error)) }
+            return
+        }
+        val saving = editor.copy(amount = amountInput, validFrom = dateInput, saving = true, error = null)
+        _uiState.update { it.copy(priceEditor = saving) }
+        viewModelScope.launch {
+            try {
+                priceRepository.addPrice(editor.classification, amount, date, session.uid)
+                _uiState.update { if (it.priceEditor !== saving) it else it.copy(priceEditor = null,
+                    priceNotice = "Precio de ${editor.classification.name} guardado con vigencia desde $date.") }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                _uiState.update { if (it.priceEditor !== saving) it else it.copy(priceEditor = saving.copy(
+                    saving = false, error = "No se pudo guardar. Comprueba la conexión y tus permisos e inténtalo de nuevo.")) }
+            }
+        }
     }
 
     fun signIn() {
@@ -131,7 +190,6 @@ class SessionViewModel @Inject constructor(
 
     private fun startObservingPrices() {
         pricesJob?.cancel()
-        val today = OperationalDate.today(clock)
         pricesJob = viewModelScope.launch {
             priceRepository.observePrices()
                 .catch { ex ->
@@ -140,18 +198,27 @@ class SessionViewModel @Inject constructor(
                     }
                 }
                 .collect { prices ->
-                    val resolved = EggClassification.entries.associateWith { classification ->
-                        getActivePriceUseCase(prices, classification, today)
-                    }
-                    _uiState.update {
-                        it.copy(
-                            operationalDate = today,
-                            activePrices = resolved,
-                            pricesError = null,
-                        )
-                    }
+                    _uiState.update { it.withPrices(prices).copy(pricesError = null) }
                 }
         }
+    }
+
+    suspend fun trackPriceDate() {
+        while (true) {
+            val now = clock.instant().atZone(OperationalDate.BOGOTA_ZONE)
+            if (_uiState.value.operationalDate != now.toLocalDate()) {
+                _uiState.update { it.withPrices(it.catalog) }
+            }
+            val midnight = now.toLocalDate().plusDays(1).atStartOfDay(OperationalDate.BOGOTA_ZONE)
+            kotlinx.coroutines.delay(java.time.Duration.between(now, midnight).toMillis().coerceAtLeast(1))
+        }
+    }
+
+    private fun SessionUiState.withPrices(prices: List<Price>): SessionUiState {
+        val today = OperationalDate.today(clock)
+        return copy(catalog = prices, operationalDate = today, activePrices = EggClassification.entries.associateWith {
+            getActivePriceUseCase(prices, it, today)
+        })
     }
 
     private fun stopObservingPrices() {

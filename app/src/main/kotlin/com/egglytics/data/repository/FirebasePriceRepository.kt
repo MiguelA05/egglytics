@@ -5,6 +5,8 @@ import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
 import com.egglytics.domain.model.Price
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
+import java.time.LocalDate
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.MetadataChanges
 import kotlinx.coroutines.channels.awaitClose
@@ -18,11 +20,27 @@ class FirebasePriceRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
 ) : PriceRepository {
 
+    private val prices get() = firestore.collection("businesses").document(BuildConfig.BUSINESS_ID).collection("prices")
+
+    override suspend fun addPrice(classification: EggClassification, amount: Long, validFrom: LocalDate, uid: String) {
+        require(amount > 0)
+        val document = prices.document()
+        // Catalog changes must be confirmed before other sales can use them.
+        firestore.runTransaction { transaction ->
+            transaction.set(document, mapOf(
+                "classification" to classification.name,
+                "pricePerBucket" to amount,
+                "validFrom" to OperationalDate.format(validFrom),
+                "createdBy" to uid,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "syncedAt" to FieldValue.serverTimestamp(),
+            ))
+            Unit
+        }.await()
+    }
+
     override fun observePrices(): Flow<List<Price>> = callbackFlow {
-        val registration = firestore
-            .collection("businesses")
-            .document(BuildConfig.BUSINESS_ID)
-            .collection("prices")
+        val registration = prices
             .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null) {
                     close(error)
@@ -36,10 +54,7 @@ class FirebasePriceRepository @Inject constructor(
     }
 
     override suspend fun getPrices(): List<Price> {
-        val snapshot = firestore
-            .collection("businesses")
-            .document(BuildConfig.BUSINESS_ID)
-            .collection("prices")
+        val snapshot = prices
             .get()
             .await()
         return snapshot.documents.mapNotNull { it.toPriceOrNull() }
@@ -54,7 +69,7 @@ private fun DocumentSnapshot.toPriceOrNull(): Price? {
     if (pricePerBucket <= 0L) return null
     val validFromRaw = getString("validFrom") ?: return null
     val validFrom = runCatching { OperationalDate.parse(validFromRaw) }.getOrNull() ?: return null
-    val createdAt = getTimestamp("createdAt")?.toDate()?.toInstant() ?: Instant.EPOCH
+    val createdAt = getTimestamp("createdAt")?.let { Instant.ofEpochSecond(it.seconds, it.nanoseconds.toLong()) } ?: Instant.EPOCH
     val createdBy = getString("createdBy").orEmpty()
 
     return Price(

@@ -27,6 +27,8 @@ import com.egglytics.data.repository.SessionState
 import com.egglytics.domain.model.DeliveryStatus
 import com.egglytics.domain.model.EggClassification
 import com.egglytics.domain.model.OperationalDate
+import com.egglytics.domain.model.Price
+import com.egglytics.domain.usecase.GetActivePriceUseCase
 import com.egglytics.domain.usecase.ActivePriceResult
 import com.egglytics.domain.usecase.SaleReversalEligibility
 import com.egglytics.ui.components.SyncStatusBadge
@@ -36,10 +38,16 @@ import com.egglytics.ui.components.VoidReasonDialog
 internal fun SaleRoute(
     session: SessionState.Authenticated,
     saleViewModel: SaleViewModel,
-    activePrices: Map<EggClassification, ActivePriceResult>,
+    catalog: List<Price>,
     onBack: () -> Unit,
 ) {
     val saleUi by saleViewModel.uiState.collectAsStateWithLifecycle()
+    val activePrices = remember(catalog, saleUi.form.saleDateInput) {
+        val date = runCatching { OperationalDate.parse(saleUi.form.saleDateInput.trim()) }.getOrNull()
+        if (date == null) emptyMap() else EggClassification.entries.associateWith {
+            GetActivePriceUseCase()(catalog, it, date)
+        }
+    }
     SaleScreen(
         businessName = session.business.name,
         currency = session.business.currency,
