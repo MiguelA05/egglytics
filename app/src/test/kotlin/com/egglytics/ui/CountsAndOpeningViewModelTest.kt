@@ -245,6 +245,13 @@ class CountsAndOpeningViewModelTest {
         assertEquals("Rechazo simulado", vm.uiState.value.form.formError)
         assertEquals("100000", vm.uiState.value.form.cashPhysicalInputs["cash"])
 
+        vm.onModeChange(CountsMode.COUNT_OR_CLOSING)
+        advanceUntilIdle()
+        assertNull(vm.uiState.value.form.cashPhysicalInputs["cash"])
+        vm.onModeChange(CountsMode.OPENING)
+        advanceUntilIdle()
+        assertEquals("100000", vm.uiState.value.form.cashPhysicalInputs["cash"])
+
         ocRepo.failNextOpening = false
         vm.onCashPhysicalChange("cash", "120000")
         advanceUntilIdle()

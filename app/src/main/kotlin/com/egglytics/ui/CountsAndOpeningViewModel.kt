@@ -94,7 +94,11 @@ class CountsAndOpeningViewModel @Inject constructor(
 
     private val activeUid = MutableStateFlow<String?>(null)
     private val isAdmin = MutableStateFlow(false)
-    private val formState = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
+    private val selectedMode = MutableStateFlow(CountsMode.COUNT_OR_CLOSING)
+    private var countDraft = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
+    private var openingDraft = MutableStateFlow(countDraft.value.copy(mode = CountsMode.OPENING))
+    private fun draft(mode: CountsMode) = if (mode == CountsMode.OPENING) openingDraft else countDraft
+    private val formState get() = draft(selectedMode.value)
 
     val uiState: StateFlow<CountsAndOpeningUiState> = activeUid.flatMapLatest { uid ->
         val initial = CountsAndOpeningUiState(form = formState.value)
@@ -145,7 +149,7 @@ class CountsAndOpeningViewModel @Inject constructor(
         }
 
         return combine(
-            formState,
+            selectedMode.flatMapLatest { draft(it) },
             isAdmin,
             baseBundle,
             feedBundle,
@@ -209,12 +213,16 @@ class CountsAndOpeningViewModel @Inject constructor(
         isAdmin.value = auth?.member?.role == MemberRole.ADMIN
         val nextUid = auth?.uid
         if (activeUid.value != nextUid) {
+            countDraft = MutableStateFlow(initialFormState(OperationalDate.today(clock)))
+            openingDraft = MutableStateFlow(countDraft.value.copy(mode = CountsMode.OPENING))
+            selectedMode.value = CountsMode.COUNT_OR_CLOSING
             activeUid.value = nextUid
-            if (nextUid == null) formState.value = initialFormState(OperationalDate.today(clock))
         }
     }
 
-    fun onModeChange(mode: CountsMode) = formState.update { it.copy(mode = mode, formError = null) }
+    fun onModeChange(mode: CountsMode) {
+        if (mode != CountsMode.OPENING || isAdmin.value) selectedMode.value = mode
+    }
     fun onDateChange(v: String) = formState.update { it.copy(dateInput = v, formError = null) }
     fun onFeedPhysicalChange(ing: FeedIngredient, v: String) =
         formState.update { it.copy(feedPhysicalInputs = it.feedPhysicalInputs + (ing to v), formError = null) }
@@ -281,12 +289,13 @@ class CountsAndOpeningViewModel @Inject constructor(
             formState.update { it.copy(formError = "Ingresa al menos un saldo inicial.") }
             return
         }
+        val submittedDraft = openingDraft
         openingAndCountRepository.recordOpenings(
             fechaOperativa = parsedDate,
             businessStartDate = session.business.startDate,
             entries = entries,
             onSuccess = {
-                formState.update {
+                submittedDraft.update {
                     it.copy(
                         feedPhysicalInputs = emptyMap(),
                         cashPhysicalInputs = emptyMap(),
@@ -295,7 +304,7 @@ class CountsAndOpeningViewModel @Inject constructor(
                     )
                 }
             },
-            onError = { err -> formState.update { it.copy(formError = err) } },
+            onError = { err -> submittedDraft.update { it.copy(formError = err) } },
         )
     }
 
@@ -362,6 +371,7 @@ class CountsAndOpeningViewModel @Inject constructor(
             emptyMap()
         }
 
+        val submittedDraft = countDraft
         openingAndCountRepository.recordCountOrClosing(
             CountSubmitRequest(
                 fechaOperativa = parsedDate,
@@ -374,7 +384,7 @@ class CountsAndOpeningViewModel @Inject constructor(
             ),
             onSuccess = {
                 val prefix = if (state.isClosing) "Cierre guardado" else "Conteo guardado"
-                formState.update {
+                submittedDraft.update {
                     it.copy(
                         feedPhysicalInputs = emptyMap(),
                         feedReasonInputs = emptyMap(),
@@ -386,7 +396,7 @@ class CountsAndOpeningViewModel @Inject constructor(
                     )
                 }
             },
-            onError = { err -> formState.update { it.copy(formError = err) } },
+            onError = { err -> submittedDraft.update { it.copy(formError = err) } },
         )
     }
 
