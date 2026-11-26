@@ -39,6 +39,7 @@ data class CashUiState(
     val summary: CashAndResultSummary? = null,
     val hasPendingSync: Boolean = false,
     val error: String? = null,
+    val periodError: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -122,8 +123,8 @@ class CashViewModel @Inject constructor(
             openingsCountsReversals,
         ) { (startStr, endStr), methods, (sales, returns, paymentsBySale), out, (openings, counts, reversals) ->
             val today = OperationalDate.today(clock)
-            val start = runCatching { OperationalDate.parse(startStr.trim()) }.getOrDefault(today)
-            val end = runCatching { OperationalDate.parse(endStr.trim()) }.getOrDefault(today)
+            val start = runCatching { OperationalDate.parse(startStr.trim()) }.getOrNull()
+            val end = runCatching { OperationalDate.parse(endStr.trim()) }.getOrNull()
             val allPayments = paymentsBySale.values.flatten()
             val summary = getCashAndResultUseCase(
                 CashAndResultRequest(
@@ -138,20 +139,26 @@ class CashViewModel @Inject constructor(
                     feedDepletions = out.depletions.map { it.depletion },
                     withdrawals = out.withdrawals.map { it.withdrawal },
                     reversals = reversals.map { it.reversal },
-                    periodStart = start,
-                    periodEnd = end,
+                    periodStart = start ?: today,
+                    periodEnd = end ?: today,
                 ),
             )
             val pending = sales.any { it.isPendingWrite } ||
                 allPayments.any { it.isPendingWrite } ||
                 out.expenses.any { it.isPendingWrite } ||
                 out.withdrawals.any { it.isPendingWrite } ||
-                out.purchases.any { it.isPendingWrite }
+                out.purchases.any { it.isPendingWrite } ||
+                out.depletions.any { it.isPendingWrite } || reversals.any { it.isPendingWrite }
             CashUiState(
                 periodStartInput = startStr,
                 periodEndInput = endStr,
                 summary = summary,
                 hasPendingSync = pending,
+                periodError = when {
+                    start == null || end == null -> "Introduce ambas fechas en formato AAAA-MM-DD."
+                    start > end -> "La fecha final debe ser igual o posterior a la inicial."
+                    else -> null
+                },
             )
         }
     }

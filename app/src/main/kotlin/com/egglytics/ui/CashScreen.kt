@@ -1,23 +1,20 @@
 package com.egglytics.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.text.NumberFormat
+import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.egglytics.data.repository.SessionState
 
@@ -29,6 +26,7 @@ internal fun CashRoute(
 ) {
     val cashUi by cashViewModel.uiState.collectAsStateWithLifecycle()
     CashScreen(
+        businessName = session.business.name,
         currency = session.business.currency,
         state = cashUi,
         onBack = onBack,
@@ -39,141 +37,116 @@ internal fun CashRoute(
 
 @Composable
 fun CashScreen(
+    businessName: String,
     currency: String,
     state: CashUiState,
     onBack: () -> Unit,
     onPeriodStartChange: (String) -> Unit,
     onPeriodEndChange: (String) -> Unit,
 ) {
-    val summary = state.summary
+    var analysis by rememberSaveable { mutableStateOf(false) }
+    var expandedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val formatter = remember { NumberFormat.getIntegerInstance(Locale.forLanguageTag("es-CO")) }
+    fun money(value: Long) = "${formatter.format(value)} $currency"
 
-    Scaffold { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Caja y análisis", style = MaterialTheme.typography.headlineSmall)
-                    OutlinedButton(onClick = onBack) { Text("Volver") }
-                }
-            }
-
-            state.error?.let { message ->
-                item { Text(message, color = MaterialTheme.colorScheme.error) }
-                return@LazyColumn
-            }
-
-            if (state.hasPendingSync) {
-                item {
-                    Text(
-                        text = "Incluye movimientos pendientes de sincronización.",
-                        color = MaterialTheme.colorScheme.tertiary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedTextField(
-                        value = state.periodStartInput,
-                        onValueChange = onPeriodStartChange,
-                        label = { Text("Desde") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = state.periodEndInput,
-                        onValueChange = onPeriodEndChange,
-                        label = { Text("Hasta") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            if (summary != null) {
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                text = "Resultado del periodo (aproximado, no contable)",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            CashLine("Ventas netas", "${summary.resultSummary.netSales} $currency")
-                            CashLine("Gastos operativos", "${summary.resultSummary.operatingExpenses} $currency")
-                            CashLine(
-                                "Costo estimado alimento agotado",
-                                summary.resultSummary.estimatedFeedCost?.let { "$it $currency" } ?: "Sin dato",
-                            )
-                            CashLine(
-                                "Resultado aproximado",
-                                summary.resultSummary.approximateResult?.let { "$it $currency" } ?: "Sin dato",
-                            )
-                            CashLine(
-                                "Egresos por compras de alimento (caja)",
-                                "${summary.resultSummary.feedPurchaseOutflows} $currency",
-                            )
-                        }
+    MaterialTheme(colorScheme = egglyticsColors) {
+        Scaffold(containerColor = egglyticsColors.background) { insets ->
+            Column(Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets).imePadding()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Caja y análisis", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(businessName, style = MaterialTheme.typography.bodySmall)
                     }
+                    TextButton(onClick = onBack) { Text("Volver") }
                 }
-
-                item {
-                    Text(
-                        text = "Caja por forma de pago (Total: ${summary.totalCashBalance} $currency)",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                TabRow(selectedTabIndex = if (analysis) 1 else 0, containerColor = egglyticsColors.background) {
+                    Tab(selected = !analysis, onClick = { analysis = false }, text = { Text("Saldo de caja") })
+                    Tab(selected = analysis, onClick = { analysis = true }, text = { Text("Resultado del periodo") })
                 }
-
-                items(summary.balancesByMethod, key = { it.method.id }) { item ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            val title = if (item.method.active) {
-                                item.method.name
-                            } else {
-                                "${item.method.name} (desactivada)"
+                key(analysis) {
+                    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        state.error?.let {
+                            item { Text(it, color = egglyticsColors.error) }
+                            return@LazyColumn
+                        }
+                        val summary = state.summary
+                        if (summary == null) {
+                            item { Text("Cargando movimientos…") }
+                            return@LazyColumn
+                        }
+                        if (state.hasPendingSync) item {
+                            Surface(shape = cashShape, color = egglyticsColors.secondaryContainer) {
+                                Text("Incluye movimientos pendientes de sincronización.", Modifier.fillMaxWidth().padding(12.dp))
                             }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(title, style = MaterialTheme.typography.titleSmall)
-                                Text("${item.balance} $currency", style = MaterialTheme.typography.titleSmall)
+                        }
+                        if (!analysis) {
+                            item {
+                                BalanceHighlight("Saldo total de caja", money(summary.totalCashBalance))
                             }
-                            Text(
-                                text = "Base: ${item.baseAmount} · Cobros: +${item.collections} · Reintegros: -${item.refunds}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            Text(
-                                text = "Gastos: -${item.expenses} · Alimento: -${item.feedPurchases} · Retiros: -${item.withdrawals}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                            if (!item.hasBase) {
-                                Text(
-                                    text = "Sin saldo de apertura/conteo base registrado",
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                            item { Text("Por forma de pago", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                            if (summary.balancesByMethod.isEmpty()) item { Text("Sin formas de pago registradas.") }
+                            items(summary.balancesByMethod, key = { it.method.id }) { account ->
+                                val expanded = expandedId == account.method.id
+                                Surface(shape = cashShape) {
+                                    Column {
+                                        Column(
+                                            Modifier.fillMaxWidth()
+                                                .clickable(role = Role.Button, onClickLabel = if (expanded) "Ocultar desglose" else "Ver desglose") {
+                                                    expandedId = if (expanded) null else account.method.id
+                                                }
+                                                .padding(16.dp),
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(account.method.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                                Text(if (expanded) "Ocultar desglose" else "Ver desglose", color = egglyticsColors.primary,
+                                                    style = MaterialTheme.typography.labelMedium)
+                                            }
+                                            Text(money(account.balance), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                            if (!account.method.active) Text("Forma de pago desactivada", style = MaterialTheme.typography.bodySmall)
+                                            if (!account.hasBase) Text("Sin saldo de apertura o conteo base", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        if (expanded) Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            HorizontalDivider()
+                                            CashLine("Saldo base", money(account.baseAmount))
+                                            account.baseSourceLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                                            CashLine("Cobros", money(account.collections))
+                                            CashLine("Reintegros", money(-account.refunds))
+                                            CashLine("Gastos operativos", money(-account.expenses))
+                                            CashLine("Compras de alimento", money(-account.feedPurchases))
+                                            CashLine("Retiros personales", money(-account.withdrawals))
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            item {
+                                CashPanel("Periodo de análisis") {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedTextField(value = state.periodStartInput, onValueChange = onPeriodStartChange,
+                                            label = { Text("Desde") }, singleLine = true, modifier = Modifier.weight(1f))
+                                        OutlinedTextField(value = state.periodEndInput, onValueChange = onPeriodEndChange,
+                                            label = { Text("Hasta") }, singleLine = true, modifier = Modifier.weight(1f))
+                                    }
+                                    state.periodError?.let { Text(it, color = egglyticsColors.error) }
+                                }
+                            }
+                            if (state.periodError != null) return@LazyColumn
+                            val result = summary.resultSummary
+                            item { BalanceHighlight("Resultado aproximado · No contable", result.approximateResult?.let(::money) ?: "Sin dato") }
+                            item {
+                                CashPanel("Cálculo del resultado") {
+                                    CashLine("Ventas netas", money(result.netSales))
+                                    CashLine("Gastos operativos", money(-result.operatingExpenses))
+                                    CashLine("Costo estimado del alimento agotado", result.estimatedFeedCost?.let { money(-it) } ?: "Sin dato")
+                                }
+                            }
+                            item {
+                                CashPanel("Compras de alimento") {
+                                    CashLine("Salida de caja del periodo", money(-result.feedPurchaseOutflows))
+                                    Text("La compra afecta la caja al pagar. El resultado usa el costo estimado del alimento agotado.",
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }
@@ -183,13 +156,32 @@ fun CashScreen(
     }
 }
 
+private val cashShape = RoundedCornerShape(16.dp)
+
+@Composable
+private fun BalanceHighlight(label: String, amount: String) {
+    Surface(color = egglyticsColors.primary, contentColor = egglyticsColors.onPrimary, shape = cashShape) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(label, style = MaterialTheme.typography.titleMedium)
+            Text(amount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun CashPanel(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Surface(shape = cashShape) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            content()
+        }
+    }
+}
+
 @Composable
 private fun CashLine(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
