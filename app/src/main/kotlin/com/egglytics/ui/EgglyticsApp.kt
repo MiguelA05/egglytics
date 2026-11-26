@@ -1,5 +1,6 @@
 package com.egglytics.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +48,7 @@ internal fun EgglyticsApp(
         }
 
         is SessionState.Authenticated -> {
+            BackHandler(enabled = sessionUi.destination != AppDestination.HOME, onBack = sessionViewModel::navigateHome)
             LaunchedEffect(session.uid) { sessionViewModel.trackPriceDate() }
             when (sessionUi.destination) {
                 AppDestination.HOME -> HomeRoute(
