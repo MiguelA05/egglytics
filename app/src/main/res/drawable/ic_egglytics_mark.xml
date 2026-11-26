@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- The three cutouts form a rising chart and survive monochrome tinting. -->
+    <path
+        android:fillColor="#FFF8F0"
+        android:fillType="evenOdd"
+        android:pathData="M54,24 C44,24 31,48 31,61 C31,75 41,84 54,84 C67,84 77,75 77,61 C77,48 64,24 54,24 Z M43,63 Q43,61 45,61 H47 Q49,61 49,63 V68 Q49,70 47,70 H45 Q43,70 43,68 Z M51,56 Q51,54 53,54 H55 Q57,54 57,56 V68 Q57,70 55,70 H53 Q51,70 51,68 Z M59,49 Q59,47 61,47 H63 Q65,47 65,49 V68 Q65,70 63,70 H61 Q59,70 59,68 Z" />
+</vector>
